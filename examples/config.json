@@ -1,0 +1,84 @@
+{
+  "providers": [
+    {
+      "name": "target-provider",
+      "base_url": "https://your-provider.example.com/v1",
+      "model": "your-model-name",
+      "api_key_env": "TARGET_PROVIDER_API_KEY",
+      "timeout_seconds": 90,
+      "headers": {
+        "X-Debug-Client": "provider-probe"
+      }
+    },
+    {
+      "name": "official-baseline",
+      "base_url": "https://api.openai.com/v1",
+      "model": "gpt-4.1-mini",
+      "api_key_env": "OPENAI_API_KEY",
+      "timeout_seconds": 90
+    }
+  ],
+  "run": {
+    "repeats": 3,
+    "output": "artifacts/report.json",
+    "temperature": 0,
+    "capture_headers": true
+  },
+  "suite": {
+    "cases": [
+      {
+        "name": "exact_json",
+        "enabled": true
+      },
+      {
+        "name": "exact_line",
+        "enabled": true
+      },
+      {
+        "name": "logic_filter",
+        "enabled": true
+      },
+      {
+        "name": "chinese_compact",
+        "enabled": true
+      },
+      {
+        "name": "nested_json_schema",
+        "enabled": true
+      },
+      {
+        "name": "response_format_json_schema",
+        "enabled": false
+      },
+      {
+        "name": "go_snippet_output",
+        "enabled": true
+      },
+      {
+        "name": "tool_call_echo",
+        "enabled": false
+      },
+      {
+        "name": "long_context_needle_small",
+        "enabled": true,
+        "params": {
+          "approx_tokens": 4000
+        }
+      },
+      {
+        "name": "long_context_needle_medium",
+        "enabled": true,
+        "params": {
+          "approx_tokens": 12000
+        }
+      },
+      {
+        "name": "long_context_needle_large",
+        "enabled": false,
+        "params": {
+          "approx_tokens": 32000
+        }
+      }
+    ]
+  }
+}

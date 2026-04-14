@@ -1,0 +1,6 @@
+artifacts/
+.omx/
+*.log
+.env
+.env.*
+.DS_Store
