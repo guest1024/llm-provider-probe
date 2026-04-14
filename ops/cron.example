@@ -1,13 +1,14 @@
-# 每天 4 个时段采样示例（请先设置 MODELSCOPE_API_KEY / OPENAI_API_KEY）
+# 每天 4 个时段采样示例
+# 建议把密钥放在仅当前用户可读的 /path/to/provider-probe/.env.local 中，然后在命令里 source。
 
 # 凌晨 02:10
-10 2 * * * cd /path/to/provider-probe && /usr/bin/env MODELSCOPE_API_KEY=xxx ./scripts/run_modelscope.sh --label overnight --repeat 1 >> /tmp/provider-probe.log 2>&1
+10 2 * * * cd /path/to/provider-probe && set -a && . ./.env.local && set +a && ./scripts/run_modelscope.sh --label overnight --repeat 1 >> /tmp/provider-probe.log 2>&1
 
 # 上午 10:10
-10 10 * * * cd /path/to/provider-probe && /usr/bin/env MODELSCOPE_API_KEY=xxx ./scripts/run_modelscope.sh --label morning --repeat 1 >> /tmp/provider-probe.log 2>&1
+10 10 * * * cd /path/to/provider-probe && set -a && . ./.env.local && set +a && ./scripts/run_modelscope.sh --label morning --repeat 1 >> /tmp/provider-probe.log 2>&1
 
 # 晚高峰 20:10
-10 20 * * * cd /path/to/provider-probe && /usr/bin/env MODELSCOPE_API_KEY=xxx ./scripts/run_modelscope.sh --label evening-peak --repeat 1 >> /tmp/provider-probe.log 2>&1
+10 20 * * * cd /path/to/provider-probe && set -a && . ./.env.local && set +a && ./scripts/run_modelscope.sh --label evening-peak --repeat 1 >> /tmp/provider-probe.log 2>&1
 
 # 每周六 21:10
-10 21 * * 6 cd /path/to/provider-probe && /usr/bin/env MODELSCOPE_API_KEY=xxx ./scripts/run_modelscope.sh --label weekend-peak --repeat 1 >> /tmp/provider-probe.log 2>&1
+10 21 * * 6 cd /path/to/provider-probe && set -a && . ./.env.local && set +a && ./scripts/run_modelscope.sh --label weekend-peak --repeat 1 >> /tmp/provider-probe.log 2>&1

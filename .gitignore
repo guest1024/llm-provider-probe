@@ -3,4 +3,6 @@ artifacts/
 *.log
 .env
 .env.*
+.env.local
+.env.secrets
 .DS_Store

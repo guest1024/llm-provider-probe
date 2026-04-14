@@ -50,3 +50,4 @@
 - 尽快使用 `examples/modelscope-vs-openai-template.json` 跑一轮真实 A/B。
 - 按凌晨 / 上午 / 晚高峰 / 周末高峰继续做定时采样。
 - 将 history verdict 作为告警输入，而不是单看单次 score。
+- 所有后续运行继续通过环境变量或受保护的 `.env.local` 注入密钥；不要把真实 token 写进配置、文档或工单。

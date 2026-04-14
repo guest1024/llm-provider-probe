@@ -1,4 +1,4 @@
-.PHONY: test list-cases smoke history history-files modelscope ab
+.PHONY: test list-cases smoke history history-files modelscope ab audit-secrets
 
 test:
 	go test ./...
@@ -20,3 +20,6 @@ modelscope:
 
 ab:
 	./scripts/run_ab.sh examples/modelscope-vs-openai-template.json ab-check
+
+audit-secrets:
+	./scripts/audit_secrets.sh

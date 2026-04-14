@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -14,6 +15,13 @@ import (
 )
 
 type RunResult = report.RunResult
+
+var (
+	bearerTokenPattern   = regexp.MustCompile(`(?i)bearer\s+[a-z0-9._\-]{12,}`)
+	modelScopeKeyPattern = regexp.MustCompile(`\bms-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+	openAIKeyPattern     = regexp.MustCompile(`\bsk-[A-Za-z0-9\-_]{16,}\b`)
+	genericSecretPattern = regexp.MustCompile(`(?i)\b(api[-_ ]?key|token|secret)\b["=: ]+([A-Za-z0-9._\-]{12,})`)
+)
 
 func Run(ctx context.Context, cfg config.Config) (report.RunResult, error) {
 	started := time.Now()
@@ -59,25 +67,25 @@ func runProvider(ctx context.Context, providerCfg config.ProviderConfig, cfg con
 				LatencyMs: latency.Milliseconds(),
 			}
 			if cfg.Run.CaptureHeaders {
-				run.ResponseHeaders = resp.Headers
+				run.ResponseHeaders = sanitizeHeaders(resp.Headers)
 			}
-			run.RawResponseSnippet = truncate(string(resp.RawBody), 400)
+			run.RawResponseSnippet = truncate(sanitizeText(string(resp.RawBody)), 400)
 			run.StatusCode = resp.StatusCode
-			run.ReturnedModel = resp.ReturnedModel
-			run.FinishReason = resp.FinishReason
+			run.ReturnedModel = sanitizeText(resp.ReturnedModel)
+			run.FinishReason = sanitizeText(resp.FinishReason)
 			run.PromptTokens = resp.PromptTokens
 			run.CompletionTokens = resp.CompletionTokens
 			run.TotalTokens = resp.TotalTokens
 
 			if err != nil {
-				run.Error = err.Error()
+				run.Error = sanitizeText(err.Error())
 			} else {
 				eval := built.Evaluate(resp)
 				run.Passed = eval.Passed
 				run.Score = eval.Score
-				run.Expected = eval.Expected
-				run.Actual = eval.Actual
-				run.Warning = eval.Warning
+				run.Expected = sanitizeText(eval.Expected)
+				run.Actual = sanitizeText(eval.Actual)
+				run.Warning = sanitizeText(eval.Warning)
 			}
 			out.Runs = append(out.Runs, run)
 		}
@@ -198,4 +206,50 @@ func hasErrorSubstring(runs []report.CaseRunResult, needle string) bool {
 		}
 	}
 	return false
+}
+
+func sanitizeHeaders(headers map[string][]string) map[string][]string {
+	if headers == nil {
+		return nil
+	}
+	sensitive := map[string]struct{}{
+		"authorization":       {},
+		"proxy-authorization": {},
+		"x-api-key":           {},
+		"api-key":             {},
+		"cookie":              {},
+		"set-cookie":          {},
+		"x-auth-token":        {},
+	}
+	out := make(map[string][]string, len(headers))
+	for key, values := range headers {
+		lower := strings.ToLower(key)
+		if _, ok := sensitive[lower]; ok {
+			out[key] = []string{"[REDACTED]"}
+			continue
+		}
+		copied := make([]string, len(values))
+		for i, value := range values {
+			copied[i] = sanitizeText(value)
+		}
+		out[key] = copied
+	}
+	return out
+}
+
+func sanitizeText(value string) string {
+	if value == "" {
+		return value
+	}
+	value = bearerTokenPattern.ReplaceAllStringFunc(value, func(match string) string {
+		parts := strings.Fields(match)
+		if len(parts) == 0 {
+			return "[REDACTED]"
+		}
+		return parts[0] + " [REDACTED]"
+	})
+	value = modelScopeKeyPattern.ReplaceAllString(value, "[REDACTED_MODELSCOPE_KEY]")
+	value = openAIKeyPattern.ReplaceAllString(value, "[REDACTED_OPENAI_KEY]")
+	value = genericSecretPattern.ReplaceAllString(value, "$1=[REDACTED]")
+	return value
 }

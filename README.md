@@ -117,6 +117,7 @@ go run ./cmd/provider-probe \
 - `*.html`：可直接打开的 HTML 报告
 - `error_runs`：本轮中出现错误响应的次数
 - `history verdict`：历史汇总里根据波动/错误/高风险次数给出的自动结论
+- 报告中的敏感 header / 常见 key 形态会自动脱敏
 - 每次 case 的：
   - `latency_ms`
   - `status_code`
@@ -199,6 +200,7 @@ go run ./cmd/provider-probe -config examples/modelscope-qwen.json -fail-on high
 - `scripts/render_history.sh`：历史趋势落盘为 md/html
 - `scripts/run_ab.sh`：target vs baseline 一键 A/B
 - `scripts/timeslot_batch.sh`：按时段标签批跑
+- `scripts/audit_secrets.sh`：扫描仓库中疑似密钥/Token 形态
 - `scripts/smoke.sh`：本地/CI 自检
 
 ---
@@ -209,6 +211,7 @@ go run ./cmd/provider-probe -config examples/modelscope-qwen.json -fail-on high
 - `docs/methodology.md`
 - `docs/modelscope.md`
 - `docs/ops.md`
+- `docs/security.md`
 - `examples/openai-baseline-template.json`
 - `examples/modelscope-vs-openai-template.json`
 
@@ -223,6 +226,7 @@ make test
 make list-cases
 make history
 make history-files
+make audit-secrets
 ```
 
 ---

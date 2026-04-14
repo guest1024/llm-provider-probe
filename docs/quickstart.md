@@ -71,3 +71,9 @@ go run ./cmd/provider-probe \
   -config examples/modelscope-qwen.json \
   -cases exact_json,nested_json_schema,go_snippet_output
 ```
+
+## 9. 做一次密钥泄漏审计
+
+```bash
+./scripts/audit_secrets.sh
+```
