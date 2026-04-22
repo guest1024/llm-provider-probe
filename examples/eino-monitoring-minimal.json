@@ -1,0 +1,35 @@
+{
+  "providers": [
+    {
+      "name": "default-eino",
+      "type": "eino_openai",
+      "base_url_env": "BASE_URL",
+      "model_env": "MODEL",
+      "api_key_env": "OPENAI_API_KEY",
+      "timeout_seconds": 90,
+      "reasoning_effort": "high",
+      "headers": {
+        "X-Debug-Client": "provider-probe-monitoring"
+      }
+    }
+  ],
+  "run": {
+    "repeats": 1,
+    "output": "artifacts/eino-monitoring-minimal.json",
+    "temperature": 0,
+    "capture_headers": true
+  },
+  "suite": {
+    "cases": [
+      {"name": "exact_json", "enabled": true},
+      {"name": "logic_filter", "enabled": true},
+      {"name": "long_context_needle_small", "enabled": true, "params": {"approx_tokens": 4000}},
+      {"name": "commonsenseqa-monitor", "enabled": true, "dataset": {"path": "benchmarks/starter/commonsenseqa-starter.jsonl", "name": "commonsenseqa", "split": "starter", "limit": 2}},
+      {"name": "gpqa-monitor", "enabled": true, "dataset": {"path": "benchmarks/starter/gpqa-starter.jsonl", "name": "gpqa", "split": "starter", "limit": 2}},
+      {"name": "webqa-monitor", "enabled": true, "dataset": {"path": "benchmarks/starter/webqa-starter.jsonl", "name": "webqa", "split": "starter", "limit": 2}},
+      {"name": "ruler-monitor", "enabled": true, "dataset": {"path": "benchmarks/starter/ruler-retrieval-starter.jsonl", "name": "ruler_retrieval", "split": "starter", "limit": 2}},
+      {"name": "brainteaser-monitor", "enabled": true, "dataset": {"path": "benchmarks/starter/brainteaser-zh-starter.jsonl", "name": "cn_brainteaser", "split": "starter", "limit": 2}},
+      {"name": "bfcl-monitor", "enabled": true, "dataset": {"path": "benchmarks/starter/bfcl-style-tool-starter.jsonl", "name": "bfcl_style", "split": "starter", "limit": 1}}
+    ]
+  }
+}

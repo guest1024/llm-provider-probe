@@ -1,0 +1,14 @@
+{
+  "input_format": "jsonl",
+  "benchmark": "bfcl_style",
+  "split": "dev",
+  "category": "tool_calling",
+  "evaluator": "tool_call",
+  "field_map": {
+    "id": "id",
+    "prompt": "prompt",
+    "tools": "tools",
+    "tool_choice": "tool_choice",
+    "expected_tool_calls": "expected_tool_calls"
+  }
+}

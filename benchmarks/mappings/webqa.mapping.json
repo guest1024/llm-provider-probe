@@ -1,0 +1,14 @@
+{
+  "input_format": "jsonl",
+  "benchmark": "webqa",
+  "split": "dev",
+  "category": "web_grounded_qa",
+  "evaluator": "exact_match",
+  "field_map": {
+    "id": "id",
+    "context": "evidence",
+    "prompt": "question",
+    "expected": "answer"
+  },
+  "acceptable_answer_fields": ["answer_alias"]
+}

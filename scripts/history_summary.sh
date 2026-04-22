@@ -6,9 +6,20 @@ cd "$ROOT_DIR"
 
 DIR="${1:-artifacts}"
 PROVIDER="${2:-}"
+GROUP_BY="${3:-provider}"
+BENCHMARK="${4:-}"
 
-if [[ -n "$PROVIDER" ]]; then
-  go run ./cmd/provider-probe history -dir "$DIR" -provider "$PROVIDER"
-else
-  go run ./cmd/provider-probe history -dir "$DIR"
+if [[ "$PROVIDER" == "provider" || "$PROVIDER" == "benchmark" || "$PROVIDER" == "provider-benchmark" ]]; then
+  BENCHMARK="${3:-}"
+  GROUP_BY="$PROVIDER"
+  PROVIDER=""
 fi
+
+CMD=(go run ./cmd/provider-probe history -dir "$DIR" -group-by "$GROUP_BY")
+if [[ -n "$PROVIDER" ]]; then
+  CMD+=(-provider "$PROVIDER")
+fi
+if [[ -n "$BENCHMARK" ]]; then
+  CMD+=(-benchmark "$BENCHMARK")
+fi
+"${CMD[@]}"

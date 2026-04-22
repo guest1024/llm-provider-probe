@@ -1,0 +1,38 @@
+{
+  "providers": [
+    {
+      "name": "default-eino",
+      "type": "eino_openai",
+      "base_url_env": "BASE_URL",
+      "model_env": "MODEL",
+      "api_key_env": "OPENAI_API_KEY",
+      "timeout_seconds": 120,
+      "reasoning_effort": "high",
+      "headers": {
+        "X-Debug-Client": "provider-probe-eino"
+      }
+    }
+  ],
+  "run": {
+    "repeats": 1,
+    "output": "artifacts/eino-benchmark-starter.json",
+    "temperature": 0,
+    "capture_headers": true
+  },
+  "suite": {
+    "cases": [
+      {"name": "exact_json", "enabled": true},
+      {"name": "logic_filter", "enabled": true},
+      {"name": "commonsenseqa-starter", "enabled": true, "dataset": {"path": "benchmarks/starter/commonsenseqa-starter.jsonl", "name": "commonsenseqa", "split": "starter"}},
+      {"name": "mmlu-pro-starter", "enabled": true, "dataset": {"path": "benchmarks/starter/mmlu-pro-starter.jsonl", "name": "mmlu_pro", "split": "starter"}},
+      {"name": "gpqa-starter", "enabled": true, "dataset": {"path": "benchmarks/starter/gpqa-starter.jsonl", "name": "gpqa", "split": "starter"}},
+      {"name": "logiqa-starter", "enabled": true, "dataset": {"path": "benchmarks/starter/logiqa-starter.jsonl", "name": "logiqa", "split": "starter"}},
+      {"name": "bbh-logical-deduction-starter", "enabled": true, "dataset": {"path": "benchmarks/starter/bbh-logical-deduction-starter.jsonl", "name": "bbh_logical_deduction", "split": "starter"}},
+      {"name": "bbh-tracking-objects-starter", "enabled": true, "dataset": {"path": "benchmarks/starter/bbh-tracking-objects-starter.jsonl", "name": "bbh_tracking_shuffled_objects", "split": "starter"}},
+      {"name": "webqa-starter", "enabled": true, "dataset": {"path": "benchmarks/starter/webqa-starter.jsonl", "name": "webqa", "split": "starter"}},
+      {"name": "ruler-retrieval-starter", "enabled": true, "dataset": {"path": "benchmarks/starter/ruler-retrieval-starter.jsonl", "name": "ruler_retrieval", "split": "starter"}},
+      {"name": "brainteaser-zh-starter", "enabled": true, "dataset": {"path": "benchmarks/starter/brainteaser-zh-starter.jsonl", "name": "cn_brainteaser", "split": "starter"}},
+      {"name": "bfcl-style-tool-starter", "enabled": true, "dataset": {"path": "benchmarks/starter/bfcl-style-tool-starter.jsonl", "name": "bfcl_style", "split": "starter", "limit": 1}}
+    ]
+  }
+}

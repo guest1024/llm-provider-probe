@@ -1,0 +1,13 @@
+{
+  "input_format": "jsonl",
+  "benchmark": "ruler_retrieval",
+  "split": "dev",
+  "category": "long_context_retrieval",
+  "evaluator": "exact_match",
+  "field_map": {
+    "id": "id",
+    "context": "context",
+    "prompt": "question",
+    "expected": "answer"
+  }
+}

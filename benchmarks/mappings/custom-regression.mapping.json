@@ -1,0 +1,18 @@
+{
+  "input_format": "jsonl",
+  "benchmark": "company_regression",
+  "split": "dev",
+  "category": "custom",
+  "evaluator": "exact_match",
+  "field_map": {
+    "id": "id",
+    "system_prompt": "system",
+    "context": "context",
+    "prompt": "prompt",
+    "expected": "expected"
+  },
+  "metadata_fields": {
+    "owner": "owner",
+    "priority": "priority"
+  }
+}

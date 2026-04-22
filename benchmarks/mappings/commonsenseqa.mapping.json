@@ -1,0 +1,19 @@
+{
+  "input_format": "jsonl",
+  "benchmark": "commonsenseqa",
+  "split": "dev",
+  "category": "commonsense",
+  "evaluator": "multiple_choice",
+  "field_map": {
+    "id": "id",
+    "prompt": "question.stem",
+    "expected": "answerKey"
+  },
+  "choice_fields": [
+    {"label": "A", "field": "question.choices.A"},
+    {"label": "B", "field": "question.choices.B"},
+    {"label": "C", "field": "question.choices.C"},
+    {"label": "D", "field": "question.choices.D"},
+    {"label": "E", "field": "question.choices.E"}
+  ]
+}

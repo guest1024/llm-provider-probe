@@ -25,6 +25,9 @@ type ProviderResult struct {
 type CaseRunResult struct {
 	CaseName           string              `json:"case_name"`
 	Category           string              `json:"category"`
+	Benchmark          string              `json:"benchmark,omitempty"`
+	Split              string              `json:"split,omitempty"`
+	SampleID           string              `json:"sample_id,omitempty"`
 	Attempt            int                 `json:"attempt"`
 	Passed             bool                `json:"passed"`
 	Score              float64             `json:"score"`
@@ -44,14 +47,27 @@ type CaseRunResult struct {
 }
 
 type ProviderSummary struct {
-	Score                  float64  `json:"score"`
-	Suspicion              string   `json:"suspicion"`
-	TotalRuns              int      `json:"total_runs"`
-	PassedRuns             int      `json:"passed_runs"`
-	ErrorRuns              int      `json:"error_runs"`
-	PassRate               float64  `json:"pass_rate"`
-	DistinctReturnedModels []string `json:"distinct_returned_models,omitempty"`
-	Warnings               []string `json:"warnings,omitempty"`
+	Score                  float64            `json:"score"`
+	Suspicion              string             `json:"suspicion"`
+	TotalRuns              int                `json:"total_runs"`
+	PassedRuns             int                `json:"passed_runs"`
+	ErrorRuns              int                `json:"error_runs"`
+	PassRate               float64            `json:"pass_rate"`
+	BenchmarkSummaries     []BenchmarkSummary `json:"benchmark_summaries,omitempty"`
+	DistinctReturnedModels []string           `json:"distinct_returned_models,omitempty"`
+	Warnings               []string           `json:"warnings,omitempty"`
+}
+
+type BenchmarkSummary struct {
+	Benchmark           string  `json:"benchmark"`
+	Split               string  `json:"split,omitempty"`
+	Attempts            int     `json:"attempts"`
+	Passes              int     `json:"passes"`
+	Errors              int     `json:"errors"`
+	PassRate            float64 `json:"pass_rate"`
+	AvgScore            float64 `json:"avg_score"`
+	AvgLatencyMs        int64   `json:"avg_latency_ms"`
+	StarterBaselineBand string  `json:"starter_baseline_band,omitempty"`
 }
 
 func Markdown(result RunResult) string {
@@ -78,11 +94,19 @@ func Markdown(result RunResult) string {
 				b.WriteString(fmt.Sprintf("  - %s\n", warning))
 			}
 		}
+		if rows := benchmarkRows(provider); len(rows) > 0 {
+			b.WriteString("\n### Benchmark Summary\n\n")
+			b.WriteString("| Benchmark | Split | Attempts | Passes | Errors | Pass Rate | Avg Score | Avg Latency(ms) | Starter Band |\n")
+			b.WriteString("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n")
+			for _, row := range rows {
+				b.WriteString(fmt.Sprintf("| %s | %s | %d | %d | %d | %.1f%% | %.2f | %d | %s |\n", row.Benchmark, row.Split, row.Attempts, row.Passes, row.Errors, row.PassRate*100, row.AvgScore, row.AvgLatencyMs, row.StarterBaselineBand))
+			}
+		}
 		b.WriteString("\n### Case Summary\n\n")
-		b.WriteString("| Case | Attempts | Passes | Errors | Avg Score | Avg Latency(ms) |\n")
-		b.WriteString("| --- | ---: | ---: | ---: | ---: | ---: |\n")
+		b.WriteString("| Case | Benchmark | Attempts | Passes | Errors | Avg Score | Avg Latency(ms) |\n")
+		b.WriteString("| --- | --- | ---: | ---: | ---: | ---: | ---: |\n")
 		for _, row := range summarizeCases(provider.Runs) {
-			b.WriteString(fmt.Sprintf("| %s | %d | %d | %d | %.2f | %d |\n", row.Name, row.Attempts, row.Passes, row.Errors, row.AvgScore, row.AvgLatencyMs))
+			b.WriteString(fmt.Sprintf("| %s | %s | %d | %d | %d | %.2f | %d |\n", row.Name, row.Benchmark, row.Attempts, row.Passes, row.Errors, row.AvgScore, row.AvgLatencyMs))
 		}
 		b.WriteString("\n")
 	}
@@ -130,15 +154,40 @@ func HTML(result RunResult) (string, error) {
       {{ range .Summary.Warnings }}<li>{{ . }}</li>{{ end }}
     </ul>
     {{ end }}
+    {{ $benchmarks := benchmarkRows . }}
+    {{ if $benchmarks }}
+    <h3>Benchmark Summary</h3>
+    <table>
+      <thead>
+        <tr><th>Benchmark</th><th>Split</th><th>Attempts</th><th>Passes</th><th>Errors</th><th>Pass Rate</th><th>Avg Score</th><th>Avg Latency (ms)</th><th>Starter Band</th></tr>
+      </thead>
+      <tbody>
+        {{ range $benchmarks }}
+        <tr>
+          <td>{{ .Benchmark }}</td>
+          <td>{{ .Split }}</td>
+          <td>{{ .Attempts }}</td>
+          <td>{{ .Passes }}</td>
+          <td>{{ .Errors }}</td>
+          <td>{{ printf "%.1f%%" (mul100 .PassRate) }}</td>
+          <td>{{ printf "%.2f" .AvgScore }}</td>
+          <td>{{ .AvgLatencyMs }}</td>
+          <td>{{ .StarterBaselineBand }}</td>
+        </tr>
+        {{ end }}
+      </tbody>
+    </table>
+    {{ end }}
     <h3>Case Summary</h3>
     <table>
       <thead>
-        <tr><th>Case</th><th>Attempts</th><th>Passes</th><th>Errors</th><th>Avg Score</th><th>Avg Latency (ms)</th></tr>
+        <tr><th>Case</th><th>Benchmark</th><th>Attempts</th><th>Passes</th><th>Errors</th><th>Avg Score</th><th>Avg Latency (ms)</th></tr>
       </thead>
       <tbody>
         {{ range summarizeCases .Runs }}
         <tr>
           <td>{{ .Name }}</td>
+          <td>{{ .Benchmark }}</td>
           <td>{{ .Attempts }}</td>
           <td>{{ .Passes }}</td>
           <td>{{ .Errors }}</td>
@@ -150,10 +199,11 @@ func HTML(result RunResult) (string, error) {
     </table>
   </section>
   {{ end }}
-</body>
+	</body>
 </html>`
 	funcs := template.FuncMap{
 		"summarizeCases": summarizeCases,
+		"benchmarkRows":  benchmarkRows,
 		"mul100":         func(v float64) float64 { return v * 100 },
 	}
 	t, err := template.New("report").Funcs(funcs).Parse(tpl)
@@ -169,6 +219,7 @@ func HTML(result RunResult) (string, error) {
 
 type CaseAggregate struct {
 	Name         string
+	Benchmark    string
 	Attempts     int
 	Passes       int
 	Errors       int
@@ -178,18 +229,21 @@ type CaseAggregate struct {
 
 func summarizeCases(runs []CaseRunResult) []CaseAggregate {
 	type acc struct {
-		attempts int
-		passes   int
-		errors   int
-		score    float64
-		latency  int64
+		name      string
+		benchmark string
+		attempts  int
+		passes    int
+		errors    int
+		score     float64
+		latency   int64
 	}
 	stats := map[string]*acc{}
 	for _, run := range runs {
-		entry := stats[run.CaseName]
+		key := run.CaseName + "::" + run.Benchmark
+		entry := stats[key]
 		if entry == nil {
-			entry = &acc{}
-			stats[run.CaseName] = entry
+			entry = &acc{name: run.CaseName, benchmark: run.Benchmark}
+			stats[key] = entry
 		}
 		entry.attempts++
 		if run.Passed {
@@ -202,9 +256,10 @@ func summarizeCases(runs []CaseRunResult) []CaseAggregate {
 		entry.latency += run.LatencyMs
 	}
 	out := make([]CaseAggregate, 0, len(stats))
-	for name, entry := range stats {
+	for _, entry := range stats {
 		out = append(out, CaseAggregate{
-			Name:         name,
+			Name:         entry.name,
+			Benchmark:    entry.benchmark,
 			Attempts:     entry.attempts,
 			Passes:       entry.passes,
 			Errors:       entry.errors,
@@ -213,7 +268,103 @@ func summarizeCases(runs []CaseRunResult) []CaseAggregate {
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name == out[j].Name {
+			return out[i].Benchmark < out[j].Benchmark
+		}
 		return out[i].Name < out[j].Name
 	})
 	return out
+}
+
+func benchmarkRows(provider ProviderResult) []BenchmarkSummary {
+	if len(provider.Summary.BenchmarkSummaries) > 0 {
+		return provider.Summary.BenchmarkSummaries
+	}
+	return SummarizeBenchmarks(provider.Runs)
+}
+
+func SummarizeBenchmarks(runs []CaseRunResult) []BenchmarkSummary {
+	type acc struct {
+		benchmark string
+		split     string
+		attempts  int
+		passes    int
+		errors    int
+		score     float64
+		latency   int64
+	}
+	stats := map[string]*acc{}
+	for _, run := range runs {
+		if strings.TrimSpace(run.Benchmark) == "" {
+			continue
+		}
+		key := run.Benchmark + "::" + run.Split
+		entry := stats[key]
+		if entry == nil {
+			entry = &acc{benchmark: run.Benchmark, split: run.Split}
+			stats[key] = entry
+		}
+		entry.attempts++
+		if run.Passed {
+			entry.passes++
+		}
+		if run.Error != "" {
+			entry.errors++
+		}
+		entry.score += run.Score
+		entry.latency += run.LatencyMs
+	}
+	out := make([]BenchmarkSummary, 0, len(stats))
+	for _, entry := range stats {
+		passRate := float64(entry.passes) / float64(entry.attempts)
+		out = append(out, BenchmarkSummary{
+			Benchmark:           entry.benchmark,
+			Split:               entry.split,
+			Attempts:            entry.attempts,
+			Passes:              entry.passes,
+			Errors:              entry.errors,
+			PassRate:            passRate,
+			AvgScore:            entry.score / float64(entry.attempts),
+			AvgLatencyMs:        entry.latency / int64(entry.attempts),
+			StarterBaselineBand: StarterBaselineBand(entry.benchmark, passRate),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Benchmark == out[j].Benchmark {
+			return out[i].Split < out[j].Split
+		}
+		return out[i].Benchmark < out[j].Benchmark
+	})
+	return out
+}
+
+func StarterBaselineBand(benchmark string, passRate float64) string {
+	type threshold struct {
+		acceptable float64
+		strong     float64
+	}
+	bands := map[string]threshold{
+		"commonsenseqa":                 {acceptable: 0.50, strong: 0.80},
+		"mmlu_pro":                      {acceptable: 0.45, strong: 0.75},
+		"gpqa":                          {acceptable: 0.35, strong: 0.65},
+		"logiqa":                        {acceptable: 0.40, strong: 0.70},
+		"bbh_logical_deduction":         {acceptable: 0.40, strong: 0.70},
+		"bbh_tracking_shuffled_objects": {acceptable: 0.40, strong: 0.70},
+		"webqa":                         {acceptable: 0.50, strong: 0.80},
+		"cn_brainteaser":                {acceptable: 0.40, strong: 0.70},
+		"bfcl_style":                    {acceptable: 0.50, strong: 0.90},
+		"ruler_retrieval":               {acceptable: 0.50, strong: 0.80},
+	}
+	item, ok := bands[benchmark]
+	if !ok {
+		return "-"
+	}
+	switch {
+	case passRate < item.acceptable:
+		return "weak"
+	case passRate < item.strong:
+		return "acceptable"
+	default:
+		return "strong"
+	}
 }

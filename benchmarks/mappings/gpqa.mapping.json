@@ -1,0 +1,18 @@
+{
+  "input_format": "jsonl",
+  "benchmark": "gpqa",
+  "split": "dev",
+  "category": "science",
+  "evaluator": "multiple_choice",
+  "field_map": {
+    "id": "id",
+    "prompt": "question",
+    "expected": "answer"
+  },
+  "choice_fields": [
+    {"label": "A", "field": "options.A"},
+    {"label": "B", "field": "options.B"},
+    {"label": "C", "field": "options.C"},
+    {"label": "D", "field": "options.D"}
+  ]
+}

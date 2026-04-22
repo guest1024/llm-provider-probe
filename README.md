@@ -1,276 +1,304 @@
 # provider-probe
 
-一个用于判断当前 LLM provider 是否“参水”的 Go 版探针工具。
+一个基于 **Eino** 的 LLM 评测/探针工具。
 
-## 目标
+它现在同时覆盖两层能力：
 
-它不是看模型“像不像”，而是输出一条证据链：
+1. **probe cases**：快速探测 provider 的格式稳定性、逻辑、长上下文、tool calling
+2. **benchmark-style datasets**：用统一 JSONL 标准接入通用 QA、WebQA、逻辑题、脑筋急转弯、工具调用等 eval 数据集
 
-- 返回模型标识是否稳定
-- 格式约束是否稳定
-- 推理/指令跟随是否稳定
-- 长上下文检索是否早衰
-- 多 provider 同题 A/B 下是否明显落后
+## 当前定位
 
-## 设计原则
+它不是纯 A/B 工具，也不是完整 leaderboard 框架；它更像：
 
-- **快速部署**：纯 Go 标准库，无第三方依赖
-- **快速测试**：内置默认测试集，可直接跑
-- **易配置**：支持命令行单 provider 模式和 JSON 配置文件模式
-- **易对比**：支持 Markdown/HTML 报告、compare 和 history 汇总
-- **易扩展**：provider 层抽象为 OpenAI-compatible HTTP adapter；后续如果要接 Eino，可在 `internal/provider` 增加 adapter，不影响 suite 和 report
+- 一个可复现的 **Eino-based eval runner**
+- 一个 provider 稳定性/退化探针
+- 一个可扩展的内部回归集执行器
 
-> 当前 MVP 没有强制引入 Eino，是为了减少依赖和部署复杂度；如果后续你要接多模型 SDK、Tool/Agent 编排或更复杂的评测流，再把 Eino 接到 provider adapter 层最合适。
+## 核心能力
+
+- 基于 `github.com/cloudwego/eino` + `github.com/cloudwego/eino-ext/components/model/openai`
+- 支持 OpenAI-compatible Base URL / API key / model 通过环境变量注入
+- 保留原有 probe cases
+- 新增 dataset-backed benchmark case 支持
+- 支持 `exact_match / regex_match / multiple_choice / tool_call` evaluator
+- 输出 JSON / Markdown / HTML 报告
+- 支持 compare / history 汇总（provider / benchmark / provider-benchmark）
+- 支持自定义内部 JSONL 数据集接入
+
+## 推荐环境变量
+
+```bash
+export OPENAI_API_KEY="<your key>"
+export BASE_URL="https://vibediary.app/api/v1"
+export MODEL="gpt-5.4"
+```
+
+> 不要把真实 key 写进配置文件、README、脚本或提交记录。
 
 ---
 
 ## 快速开始
 
-### 1. 一键自测
+### 1. 本地自测
 
 ```bash
 ./scripts/smoke.sh
 ```
 
-### 2. 单 provider 快速跑
-
-```bash
-go run ./cmd/provider-probe \
-  -base-url https://api.openai.com/v1 \
-  -model gpt-4.1-mini \
-  -api-key-env OPENAI_API_KEY \
-  -repeat 2 \
-  -out artifacts/quick.json
-```
-
-### 3. 多 provider A/B 跑
-
-```bash
-export TARGET_PROVIDER_API_KEY=xxx
-export OPENAI_API_KEY=xxx
-
-go run ./cmd/provider-probe -config examples/config.json
-```
-
-### 4. 用脚本跑 ModelScope / Qwen
-
-```bash
-export MODELSCOPE_API_KEY=你的_key
-./scripts/run_modelscope.sh --repeat 2
-```
-
-### 5. 查看内置测试项
+### 2. 查看内置 probe case
 
 ```bash
 go run ./cmd/provider-probe -list-cases
 ```
 
-### 6. 对比两次报告
+### 3. 跑 Eino starter benchmark
+
+```bash
+./scripts/run_eino_starter.sh
+```
+
+它会读取：
+
+- `OPENAI_API_KEY`
+- `BASE_URL`
+- `MODEL`
+
+并执行 `examples/eino-benchmark-starter.json` 中的 starter benchmark。
+
+### 4. 跑粗粒度参水监测配置
+
+```bash
+./scripts/run_eino_monitoring.sh
+```
+
+它会执行一个更轻量的监测矩阵，目标是快速发现**严重参水/明显降级**，而不是追求和官方 benchmark 高度对齐。
+
+### 5. 跑单 provider 配置
+
+```bash
+go run ./cmd/provider-probe -config examples/eino-benchmark-starter.json
+```
+
+### 6. 跑自定义内部数据集
+
+```bash
+go run ./cmd/provider-probe -config examples/custom-dataset-template.json
+```
+
+### 7. 对比两次运行
 
 ```bash
 ./scripts/compare_reports.sh artifacts/run-a.json artifacts/run-b.json
 ```
 
-### 7. 查看历史趋势
+### 8. 查看历史趋势
 
 ```bash
 ./scripts/history_summary.sh artifacts
+./scripts/history_summary.sh artifacts benchmark
 ```
 
-history 输出会附带：
-- latest score / suspicion
-- volatility
-- 自动 verdict
+---
 
-### 8. 渲染历史汇总文件
+## 当前支持的 probe case
+
+- `exact_json`
+- `exact_line`
+- `logic_filter`
+- `chinese_compact`
+- `nested_json_schema`
+- `response_format_json_schema`
+- `go_snippet_output`
+- `tool_call_echo`
+- `long_context_needle_small`
+- `long_context_needle_medium`
+- `long_context_needle_large`
+
+## 当前附带的 starter benchmark-style datasets
+
+- `benchmarks/starter/commonsenseqa-starter.jsonl`
+- `benchmarks/starter/mmlu-pro-starter.jsonl`
+- `benchmarks/starter/gpqa-starter.jsonl`
+- `benchmarks/starter/logiqa-starter.jsonl`
+- `benchmarks/starter/bbh-logical-deduction-starter.jsonl`
+- `benchmarks/starter/bbh-tracking-objects-starter.jsonl`
+- `benchmarks/starter/webqa-starter.jsonl`
+- `benchmarks/starter/ruler-retrieval-starter.jsonl`
+- `benchmarks/starter/brainteaser-zh-starter.jsonl`
+- `benchmarks/starter/bfcl-style-tool-starter.jsonl`
+
+这些 starter 集的用途是：
+
+- 验证框架接入
+- 做小规模回归
+- 给 provider 一个初级能力基线
+- 为后续接更大公开 benchmark 打样
+
+它们**不是**官方 leaderboard 成绩替代。
+
+---
+
+## 自定义 dataset 接入
+
+项目支持通过 `suite.cases[].dataset` 指向 JSONL 数据集。
+
+最小配置示例：
+
+```json
+{
+  "name": "company-regression",
+  "enabled": true,
+  "dataset": {
+    "path": "benchmarks/custom/example-company-regression.jsonl",
+    "name": "company_regression",
+    "split": "dev"
+  }
+}
+```
+
+支持的 evaluator：
+
+- `exact_match`
+- `regex_match`
+- `multiple_choice`
+- `tool_call`
+
+详细字段说明见：
+
+- `docs/custom-dataset-standard.md`
+- `benchmarks/custom/example-company-regression.jsonl`
+- `examples/custom-dataset-template.json`
+
+## Benchmark 转换工具
+
+仓库提供原始 benchmark -> 本项目 JSONL 的转换脚本：
 
 ```bash
-./scripts/render_history.sh artifacts artifacts/history-summary
+python3 scripts/convert_dataset.py \
+  --mapping benchmarks/mappings/commonsenseqa.mapping.json \
+  --input benchmarks/source-samples/commonsenseqa-sample.jsonl \
+  --output /tmp/commonsenseqa.converted.jsonl
 ```
 
-### 9. 跑官方 baseline A/B
+更多说明见：
 
-```bash
-export MODELSCOPE_API_KEY=xxx
-export OPENAI_API_KEY=xxx
-./scripts/run_ab.sh examples/modelscope-vs-openai-template.json ab-check
-```
+- `docs/benchmark-conversion.md`
+- `benchmarks/mappings/*.mapping.json`
+- `benchmarks/source-samples/*`
 
-### 10. 只跑指定能力 case
+当前附带的 mapping 样例包括：
 
-```bash
-go run ./cmd/provider-probe \
-  -config examples/modelscope-qwen.json \
-  -cases exact_json,nested_json_schema,go_snippet_output
-```
+- `commonsenseqa`
+- `mmlu-pro`
+- `gpqa`
+- `logiqa`
+- `webqa`
+- `ruler-retrieval`
+- `bbh-logical-deduction`
+- `brainteaser-zh`
+- `bfcl-style-tool`
+- `custom-regression`
+
+---
+
+## Starter baseline 建议
+
+见 `docs/benchmarks.md`。
+
+当前仓库给的是 **starter baseline band**，不是学术 leaderboard：
+
+- `commonsenseqa-starter`
+- `mmlu-pro-starter`
+- `gpqa-starter`
+- `logiqa-starter`
+- `webqa-starter`
+- `ruler-retrieval-starter`
+- `cn_brainteaser`
+- `bfcl-style-tool-starter`
+
+用于把模型表现粗分为：
+
+- weak
+- acceptable
+- strong
+
+这些 band 现在也会出现在 provider report 的 benchmark summary 中，方便直接看“当前模型对这个 starter 子集处在哪个初级档位”。
+
+如果你的目标只是发现**严重参水**，优先看：
+
+- 是否掉到 `weak`
+- 是否多个 benchmark 同时变弱
+- 是否 probe 也同时失败
+
+不需要追求和预期分数完全严丝合缝。
 
 ---
 
 ## 输出解释
 
-工具会输出：
+每轮运行会输出：
 
-- `score`：综合分，0~100
-- `suspicion`：`low | medium | high`
-- `warnings`：疑点说明
-- `*.md`：自动生成的人类可读结论报告
-- `*.html`：可直接打开的 HTML 报告
-- `error_runs`：本轮中出现错误响应的次数
-- `history verdict`：历史汇总里根据波动/错误/高风险次数给出的自动结论
-- 报告中的敏感 header / 常见 key 形态会自动脱敏
-- 每次 case 的：
+- `score`
+- `suspicion`
+- `warnings`
+- `*.json`
+- `*.md`
+- `*.html`
+- 每个 sample/case 的：
+  - `benchmark`
+  - `split`
+  - `sample_id`
   - `latency_ms`
   - `status_code`
   - `returned_model`
   - `finish_reason`
   - `prompt_tokens / completion_tokens / total_tokens`
-  - `response_headers`
-  - `raw_response_snippet`
-
-### Suspicion 解释
-
-- `low`：暂时没有明显证据说明 provider 在降配/混模
-- `medium`：存在一致性问题，需要扩大样本复测
-- `high`：有较强证据显示输出质量、长上下文或模型标识存在明显异常
-
-### CI / 自动告警
-
-可以加 `-fail-on`：
-
-```bash
-go run ./cmd/provider-probe -config examples/modelscope-qwen.json -fail-on high
-```
-
-当任一 provider 的 `suspicion` 达到阈值时，进程会返回非 0。
+- `raw_response_snippet`
+- benchmark 维度汇总：
+  - `attempts / passes / errors`
+  - `pass_rate`
+  - `avg_score`
+  - `starter_baseline_band`
 
 ---
 
-## 建议测试流程
+## 目录说明
 
-### 最小可用版
-
-1. 跑默认 8 个 case
-2. 每个 case 跑 3 次
-3. target provider 和 official baseline 同时跑
-4. 如果 target 明显落后 15 分以上，再扩到：
-   - `long_context_needle_large`
-   - 不同时段重复跑
-   - 增加自定义 case
-
-### 时段降配检测
-
-当前工具负责“单次矩阵采样”。
-要检查高峰期动态降配，建议用 cron/CI 在以下时段重复执行并比较 `artifacts/*.json`：
-
-- 凌晨
-- 上午
-- 晚高峰
-- 周末高峰
-
-也可以直接用脚本批量打标签：
-
-```bash
-./scripts/timeslot_batch.sh --config examples/modelscope-qwen.json --repeat 1
-```
+- `internal/provider`：Eino-based model invocation
+- `internal/suite`：built-in probe cases + dataset case expansion
+- `internal/dataset`：JSONL dataset loader
+- `internal/report`：报告结构与渲染
+- `benchmarks/starter`：starter benchmark fixtures
+- `benchmarks/custom`：自定义数据集范例
+- `examples/*.json`：运行配置模板
+- `docs/benchmarks.md`：benchmark 覆盖与 starter baseline
+- `docs/custom-dataset-standard.md`：自定义数据集接入规范
+- `docs/monitoring.md`：粗粒度参水监测用法
 
 ---
 
-## 配置文件说明
-
-见 `examples/config.json`。
-
-重点字段：
-
-- `providers[].base_url`：API 基础地址
-- `providers[].model`：模型名
-- `providers[].api_key_env`：从环境变量取 key
-- `providers[].headers`：附加 header
-- `providers[].extra_body`：给请求体附加 provider 私有参数
-- `suite.cases[].params.approx_tokens`：长上下文 case 近似 token 数
-- `run.output`：JSON 报告输出路径；对应 Markdown/HTML 会默认落到同名前缀
-
----
-
-## 脚本
-
-- `scripts/run_probe.sh`：通用单次运行入口
-- `scripts/run_modelscope.sh`：ModelScope/Qwen 快捷入口
-- `scripts/compare_reports.sh`：报告对比
-- `scripts/history_summary.sh`：历史趋势汇总
-- `scripts/render_history.sh`：历史趋势落盘为 md/html
-- `scripts/run_ab.sh`：target vs baseline 一键 A/B
-- `scripts/timeslot_batch.sh`：按时段标签批跑
-- `scripts/audit_secrets.sh`：扫描仓库中疑似密钥/Token 形态
-- `scripts/smoke.sh`：本地/CI 自检
-
----
-
-## 文档
-
-- `docs/quickstart.md`
-- `docs/methodology.md`
-- `docs/modelscope.md`
-- `docs/ops.md`
-- `docs/security.md`
-- `examples/openai-baseline-template.json`
-- `examples/modelscope-vs-openai-template.json`
-
----
-
-## Makefile
-
-常用入口：
+## 常用命令
 
 ```bash
 make test
 make list-cases
+make eino-starter
+make eino-monitoring
 make history
+make benchmark-history
 make history-files
+make benchmark-history-files
 make audit-secrets
 ```
 
 ---
 
-## 新增内置 case
-
-- `chinese_compact`：中文严格单行输出
-- `nested_json_schema`：嵌套 JSON 结构遵循
-- `response_format_json_schema`：基于 `response_format=json_schema` 的严格结构输出
-- `go_snippet_output`：Go 代码阅读/执行结果推断
-- `tool_call_echo`：函数/工具调用返回能力探针
-
----
-
 ## 后续扩展建议
 
-### 1. 自定义测试集
+优先顺序：
 
-可扩展 `internal/suite`：
-
-- 中文格式约束
-- 代码修复小题
-- JSON schema 模式
-- Tool calling / function calling
-- vision case
-
-### 2. Eino 接入点
-
-如需接 Eino，建议做法：
-
-- 在 `internal/provider` 新增 `eino_adapter.go`
-- 保持 `Run(ctx, cfg)` 和 suite evaluator 不变
-- 用配置决定走 `openai-compatible` 还是 `eino`
-
-### 3. 报表聚合
-
-当前已支持：
-
-- `compare` 子命令
-- `history` 子命令
-- 自动输出 markdown/html 结论
-
-下一步可以继续加：
-
-- 历史运行趋势图
-- 不同时段漂移分析
-- 更细粒度的 case 维度趋势
+1. 接更完整的公开 benchmark 转换脚本
+2. 增加更多 evaluator（如 citation / evidence span / partial credit）
+3. 增加 live web browsing / browser-agent WebQA
+4. 增加 multi-step tool execution eval

@@ -1,0 +1,1 @@
+{"id":"logiqa-raw-1","context":"All zargs are wibs. No wibs are tams.","question":"Which statement must be true?","options":{"A":"Some tams are zargs","B":"No zargs are tams","C":"All tams are zargs","D":"Some wibs are tams"},"answer":"B"}

@@ -1,6 +1,8 @@
 package suite
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"model-codex/internal/config"
@@ -26,5 +28,24 @@ func TestExactJSONRejectsInvalidJSON(t *testing.T) {
 	result := built.Evaluate(provider.Response{Content: "not json"})
 	if result.Passed {
 		t.Fatalf("expected fail, got %+v", result)
+	}
+}
+
+func TestBuildManyDatasetCase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mini.jsonl")
+	payload := "{\"id\":\"s1\",\"benchmark\":\"commonsenseqa\",\"prompt\":\"2+2?\",\"evaluator\":\"exact_match\",\"expected\":\"4\"}\n{\"id\":\"s2\",\"benchmark\":\"commonsenseqa\",\"prompt\":\"3+3?\",\"evaluator\":\"exact_match\",\"expected\":\"6\"}\n"
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	items, err := BuildMany(config.CaseConfig{Name: "math-mini", Enabled: true, Dataset: &config.DatasetConfig{Path: path}})
+	if err != nil {
+		t.Fatalf("BuildMany failed: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0].SampleID != "s1" || items[0].Benchmark != "commonsenseqa" {
+		t.Fatalf("unexpected metadata: %+v", items[0])
 	}
 }

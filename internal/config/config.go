@@ -14,15 +14,19 @@ type Config struct {
 }
 
 type ProviderConfig struct {
-	Name           string            `json:"name"`
-	BaseURL        string            `json:"base_url"`
-	Endpoint       string            `json:"endpoint"`
-	Model          string            `json:"model"`
-	APIKey         string            `json:"api_key,omitempty"`
-	APIKeyEnv      string            `json:"api_key_env,omitempty"`
-	Headers        map[string]string `json:"headers,omitempty"`
-	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
-	ExtraBody      map[string]any    `json:"extra_body,omitempty"`
+	Name            string            `json:"name"`
+	Type            string            `json:"type,omitempty"`
+	BaseURL         string            `json:"base_url,omitempty"`
+	BaseURLEnv      string            `json:"base_url_env,omitempty"`
+	Endpoint        string            `json:"endpoint,omitempty"`
+	Model           string            `json:"model,omitempty"`
+	ModelEnv        string            `json:"model_env,omitempty"`
+	APIKey          string            `json:"api_key,omitempty"`
+	APIKeyEnv       string            `json:"api_key_env,omitempty"`
+	Headers         map[string]string `json:"headers,omitempty"`
+	TimeoutSeconds  int               `json:"timeout_seconds,omitempty"`
+	ExtraBody       map[string]any    `json:"extra_body,omitempty"`
+	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
 }
 
 type RunConfig struct {
@@ -36,10 +40,19 @@ type SuiteConfig struct {
 	Cases []CaseConfig `json:"cases"`
 }
 
+type DatasetConfig struct {
+	Path    string `json:"path"`
+	Name    string `json:"name,omitempty"`
+	Split   string `json:"split,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+	Shuffle bool   `json:"shuffle,omitempty"`
+}
+
 type CaseConfig struct {
 	Name    string         `json:"name"`
 	Enabled bool           `json:"enabled"`
 	Params  map[string]any `json:"params,omitempty"`
+	Dataset *DatasetConfig `json:"dataset,omitempty"`
 }
 
 func Default() Config {
@@ -84,11 +97,14 @@ func (c Config) Validate() error {
 		if strings.TrimSpace(provider.Name) == "" {
 			return fmt.Errorf("provider name is required")
 		}
-		if strings.TrimSpace(provider.BaseURL) == "" {
-			return fmt.Errorf("provider %s: base_url is required", provider.Name)
+		if strings.TrimSpace(provider.ResolvedBaseURL()) == "" {
+			return fmt.Errorf("provider %s: base_url or base_url_env is required", provider.Name)
 		}
-		if strings.TrimSpace(provider.Model) == "" {
-			return fmt.Errorf("provider %s: model is required", provider.Name)
+		if strings.TrimSpace(provider.ResolvedModel()) == "" {
+			return fmt.Errorf("provider %s: model or model_env is required", provider.Name)
+		}
+		if provider.Type != "" && provider.Type != "eino_openai" {
+			return fmt.Errorf("provider %s: unsupported type %q", provider.Name, provider.Type)
 		}
 	}
 	if c.Run.Repeats <= 0 {
@@ -96,6 +112,11 @@ func (c Config) Validate() error {
 	}
 	if len(c.Suite.Cases) == 0 {
 		return fmt.Errorf("suite.cases cannot be empty")
+	}
+	for _, item := range c.Suite.Cases {
+		if item.Dataset != nil && strings.TrimSpace(item.Dataset.Path) == "" {
+			return fmt.Errorf("case %s: dataset.path is required when dataset is configured", item.Name)
+		}
 	}
 	return nil
 }
@@ -115,4 +136,31 @@ func (p ProviderConfig) ResolvedAPIKey() string {
 		return ""
 	}
 	return os.Getenv(p.APIKeyEnv)
+}
+
+func (p ProviderConfig) ResolvedBaseURL() string {
+	if strings.TrimSpace(p.BaseURL) != "" {
+		return p.BaseURL
+	}
+	if p.BaseURLEnv == "" {
+		return ""
+	}
+	return os.Getenv(p.BaseURLEnv)
+}
+
+func (p ProviderConfig) ResolvedModel() string {
+	if strings.TrimSpace(p.Model) != "" {
+		return p.Model
+	}
+	if p.ModelEnv == "" {
+		return ""
+	}
+	return os.Getenv(p.ModelEnv)
+}
+
+func (p ProviderConfig) ResolvedType() string {
+	if strings.TrimSpace(p.Type) == "" {
+		return "eino_openai"
+	}
+	return p.Type
 }

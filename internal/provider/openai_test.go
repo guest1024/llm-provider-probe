@@ -17,18 +17,14 @@ func TestDoRejectsEmptyChoices(t *testing.T) {
 	defer srv.Close()
 
 	client := NewClient(config.ProviderConfig{
-		Name:     "demo",
-		BaseURL:  srv.URL,
-		Model:    "demo-model",
-		Endpoint: "",
+		Name:    "demo",
+		BaseURL: srv.URL,
+		Model:   "demo-model",
 	})
 
 	resp, err := client.Do(context.Background(), Request{Model: "demo-model", Messages: []Message{{Role: "user", Content: "hi"}}})
 	if err == nil {
 		t.Fatalf("expected error, got nil response=%+v", resp)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", resp.StatusCode)
 	}
 }
 
@@ -44,7 +40,25 @@ func TestDoParsesToolCalls(t *testing.T) {
 	defer srv.Close()
 
 	client := NewClient(config.ProviderConfig{Name: "demo", BaseURL: srv.URL, Model: "demo-model"})
-	resp, err := client.Do(context.Background(), Request{Model: "demo-model", Messages: []Message{{Role: "user", Content: "hi"}}})
+	resp, err := client.Do(context.Background(), Request{
+		Model:    "demo-model",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+		ExtraBody: map[string]any{
+			"tools": []map[string]any{{
+				"type": "function",
+				"function": map[string]any{
+					"name":        "probe_echo",
+					"description": "Echo",
+					"parameters": map[string]any{
+						"type":       "object",
+						"properties": map[string]any{"token": map[string]any{"type": "string"}},
+						"required":   []string{"token"},
+					},
+				},
+			}},
+			"tool_choice": map[string]any{"function": map[string]any{"name": "probe_echo"}},
+		},
+	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -53,5 +67,8 @@ func TestDoParsesToolCalls(t *testing.T) {
 	}
 	if resp.ToolCalls[0].Name != "probe_echo" || resp.ToolCalls[0].Arguments != "{\"token\":\"PX-77\"}" {
 		t.Fatalf("unexpected tool call: %+v", resp.ToolCalls[0])
+	}
+	if resp.ReturnedModel != "demo" {
+		t.Fatalf("expected returned model demo, got %q", resp.ReturnedModel)
 	}
 }

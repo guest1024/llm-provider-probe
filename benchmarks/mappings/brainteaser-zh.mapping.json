@@ -1,0 +1,13 @@
+{
+  "input_format": "csv",
+  "benchmark": "cn_brainteaser",
+  "split": "dev",
+  "category": "brainteaser",
+  "evaluator": "exact_match",
+  "field_map": {
+    "id": "id",
+    "system_prompt": "system_prompt",
+    "prompt": "prompt",
+    "expected": "answer"
+  }
+}

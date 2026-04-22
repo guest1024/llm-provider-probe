@@ -42,52 +42,57 @@ func Run(ctx context.Context, cfg config.Config) (report.RunResult, error) {
 
 func runProvider(ctx context.Context, providerCfg config.ProviderConfig, cfg config.Config) (report.ProviderResult, error) {
 	client := provider.NewClient(providerCfg)
-	out := report.ProviderResult{Name: providerCfg.Name, BaseURL: providerCfg.BaseURL, Model: providerCfg.Model}
+	out := report.ProviderResult{Name: providerCfg.Name, BaseURL: providerCfg.ResolvedBaseURL(), Model: providerCfg.ResolvedModel()}
 
 	for _, caseCfg := range cfg.Suite.Cases {
 		if !caseCfg.Enabled {
 			continue
 		}
-		built, err := suite.Build(caseCfg)
+		builtItems, err := suite.BuildMany(caseCfg)
 		if err != nil {
 			return report.ProviderResult{}, err
 		}
 
-		for attempt := 1; attempt <= cfg.Run.Repeats; attempt++ {
-			req := provider.Request{Model: providerCfg.Model, Messages: built.Messages, Temperature: cfg.Run.Temperature, ExtraBody: built.ExtraBody}
-			started := time.Now()
-			resp, err := client.Do(ctx, req)
-			latency := time.Since(started)
+		for _, built := range builtItems {
+			for attempt := 1; attempt <= cfg.Run.Repeats; attempt++ {
+				req := provider.Request{Model: providerCfg.ResolvedModel(), Messages: built.Messages, Temperature: cfg.Run.Temperature, ExtraBody: built.ExtraBody}
+				started := time.Now()
+				resp, err := client.Do(ctx, req)
+				latency := time.Since(started)
 
-			run := report.CaseRunResult{
-				CaseName:  built.Name,
-				Category:  built.Category,
-				Attempt:   attempt,
-				Expected:  built.Expected,
-				LatencyMs: latency.Milliseconds(),
-			}
-			if cfg.Run.CaptureHeaders {
-				run.ResponseHeaders = sanitizeHeaders(resp.Headers)
-			}
-			run.RawResponseSnippet = truncate(sanitizeText(string(resp.RawBody)), 400)
-			run.StatusCode = resp.StatusCode
-			run.ReturnedModel = sanitizeText(resp.ReturnedModel)
-			run.FinishReason = sanitizeText(resp.FinishReason)
-			run.PromptTokens = resp.PromptTokens
-			run.CompletionTokens = resp.CompletionTokens
-			run.TotalTokens = resp.TotalTokens
+				run := report.CaseRunResult{
+					CaseName:   built.Name,
+					Category:   built.Category,
+					Benchmark:  built.Benchmark,
+					Split:      built.Split,
+					SampleID:   built.SampleID,
+					Attempt:    attempt,
+					Expected:   built.Expected,
+					LatencyMs:  latency.Milliseconds(),
+					StatusCode: resp.StatusCode,
+				}
+				if cfg.Run.CaptureHeaders {
+					run.ResponseHeaders = sanitizeHeaders(resp.Headers)
+				}
+				run.RawResponseSnippet = truncate(sanitizeText(string(resp.RawBody)), 400)
+				run.ReturnedModel = sanitizeText(resp.ReturnedModel)
+				run.FinishReason = sanitizeText(resp.FinishReason)
+				run.PromptTokens = resp.PromptTokens
+				run.CompletionTokens = resp.CompletionTokens
+				run.TotalTokens = resp.TotalTokens
 
-			if err != nil {
-				run.Error = sanitizeText(err.Error())
-			} else {
-				eval := built.Evaluate(resp)
-				run.Passed = eval.Passed
-				run.Score = eval.Score
-				run.Expected = sanitizeText(eval.Expected)
-				run.Actual = sanitizeText(eval.Actual)
-				run.Warning = sanitizeText(eval.Warning)
+				if err != nil {
+					run.Error = sanitizeText(err.Error())
+				} else {
+					eval := built.Evaluate(resp)
+					run.Passed = eval.Passed
+					run.Score = eval.Score
+					run.Expected = sanitizeText(eval.Expected)
+					run.Actual = sanitizeText(eval.Actual)
+					run.Warning = sanitizeText(eval.Warning)
+				}
+				out.Runs = append(out.Runs, run)
 			}
-			out.Runs = append(out.Runs, run)
 		}
 	}
 
@@ -106,6 +111,7 @@ func summarizeProvider(runs []report.CaseRunResult) report.ProviderSummary {
 	var totalScore float64
 	modelSet := map[string]struct{}{}
 	caseStats := map[string]struct{ total, passed int }{}
+	benchmarkStats := map[string]struct{ total, passed int }{}
 
 	for _, run := range runs {
 		totalScore += run.Score
@@ -124,10 +130,19 @@ func summarizeProvider(runs []report.CaseRunResult) report.ProviderSummary {
 			stat.passed++
 		}
 		caseStats[run.CaseName] = stat
+		if run.Benchmark != "" {
+			bench := benchmarkStats[run.Benchmark]
+			bench.total++
+			if run.Passed {
+				bench.passed++
+			}
+			benchmarkStats[run.Benchmark] = bench
+		}
 	}
 
 	summary.Score = totalScore / float64(len(runs)) * 100
 	summary.PassRate = float64(summary.PassedRuns) / float64(len(runs))
+	summary.BenchmarkSummaries = report.SummarizeBenchmarks(runs)
 	summary.DistinctReturnedModels = sortedKeys(modelSet)
 
 	if len(summary.DistinctReturnedModels) > 1 {
@@ -148,6 +163,17 @@ func summarizeProvider(runs []report.CaseRunResult) report.ProviderSummary {
 			summary.Warnings = append(summary.Warnings, fmt.Sprintf("JSON compliance is weak on %s (pass rate %.0f%%)", name, rate*100))
 		case name == "logic_filter" && rate < 0.67:
 			summary.Warnings = append(summary.Warnings, fmt.Sprintf("reasoning consistency is weak on %s (pass rate %.0f%%)", name, rate*100))
+		}
+	}
+	for name, stat := range benchmarkStats {
+		rate := float64(stat.passed) / float64(stat.total)
+		band := report.StarterBaselineBand(name, rate)
+		if band == "weak" || (band == "-" && rate < 0.4) {
+			if band != "-" {
+				summary.Warnings = append(summary.Warnings, fmt.Sprintf("benchmark %s is weak (pass rate %.0f%%, starter band=%s)", name, rate*100, band))
+			} else {
+				summary.Warnings = append(summary.Warnings, fmt.Sprintf("benchmark %s is weak (pass rate %.0f%%)", name, rate*100))
+			}
 		}
 	}
 

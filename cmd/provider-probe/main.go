@@ -176,6 +176,8 @@ func runHistory(args []string) int {
 	fsFlags := flag.NewFlagSet("history", flag.ContinueOnError)
 	dir := fsFlags.String("dir", "artifacts", "Directory containing JSON reports")
 	providerName := fsFlags.String("provider", "", "Only summarize one provider")
+	benchmarkName := fsFlags.String("benchmark", "", "Only summarize one benchmark")
+	groupBy := fsFlags.String("group-by", "provider", "History grouping: provider, benchmark, or provider-benchmark")
 	mdOut := fsFlags.String("md-out", "", "Optional markdown summary output path")
 	htmlOut := fsFlags.String("html-out", "", "Optional HTML summary output path")
 	if err := fsFlags.Parse(args); err != nil {
@@ -200,16 +202,20 @@ func runHistory(args []string) int {
 		}
 		results = append(results, item)
 	}
-	summary, aggregates := buildHistorySummary(results, *providerName)
+	summary, aggregates, err := buildHistorySummary(results, *providerName, *benchmarkName, *groupBy)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "build history summary: %v\n", err)
+		return 2
+	}
 	fmt.Print(summary)
 	if *mdOut != "" {
-		if err := os.WriteFile(*mdOut, []byte(historyMarkdown(aggregates)), 0o644); err != nil {
+		if err := os.WriteFile(*mdOut, []byte(historyMarkdown(aggregates, *groupBy)), 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "write history markdown: %v\n", err)
 			return 1
 		}
 	}
 	if *htmlOut != "" {
-		payload, err := historyHTML(aggregates)
+		payload, err := historyHTML(aggregates, *groupBy)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "render history html: %v\n", err)
 			return 1
@@ -384,61 +390,83 @@ func collectJSONReports(root string) ([]string, error) {
 
 type historyAggregate struct {
 	Name            string
-	Runs            int
+	Provider        string
+	Benchmark       string
+	Reports         int
 	ScoreSum        float64
 	ScoreMin        float64
 	ScoreMax        float64
+	PassRateSum     float64
 	MediumCount     int
 	HighCount       int
 	ErrorRuns       int
 	LatestCompleted time.Time
 	LatestScore     float64
+	LatestPassRate  float64
 	LatestSuspicion string
 }
 
-func buildHistorySummary(results []report.RunResult, onlyProvider string) (string, []historyAggregate) {
+func buildHistorySummary(results []report.RunResult, onlyProvider, onlyBenchmark, groupBy string) (string, []historyAggregate, error) {
+	groupBy = strings.TrimSpace(groupBy)
+	if groupBy == "" {
+		groupBy = "provider"
+	}
+	if groupBy != "provider" && groupBy != "benchmark" && groupBy != "provider-benchmark" {
+		return "", nil, fmt.Errorf("unsupported group-by %q", groupBy)
+	}
 	type acc struct {
 		runs            int
 		scoreSum        float64
 		scoreMin        float64
 		scoreMax        float64
+		passRateSum     float64
 		mediumCount     int
 		highCount       int
 		errorRuns       int
 		latestCompleted time.Time
 		latestScore     float64
+		latestPassRate  float64
 		latestSuspicion string
+		provider        string
+		benchmark       string
 	}
 	stats := map[string]*acc{}
 	for _, result := range results {
 		for _, provider := range result.Providers {
-			if onlyProvider != "" && provider.Name != onlyProvider {
-				continue
-			}
-			item := stats[provider.Name]
-			if item == nil {
-				item = &acc{scoreMin: provider.Summary.Score, scoreMax: provider.Summary.Score}
-				stats[provider.Name] = item
-			}
-			item.runs++
-			item.scoreSum += provider.Summary.Score
-			if provider.Summary.Score < item.scoreMin {
-				item.scoreMin = provider.Summary.Score
-			}
-			if provider.Summary.Score > item.scoreMax {
-				item.scoreMax = provider.Summary.Score
-			}
-			if provider.Summary.Suspicion == "medium" {
-				item.mediumCount++
-			}
-			if provider.Summary.Suspicion == "high" {
-				item.highCount++
-			}
-			item.errorRuns += provider.Summary.ErrorRuns
-			if result.CompletedAt.After(item.latestCompleted) {
-				item.latestCompleted = result.CompletedAt
-				item.latestScore = provider.Summary.Score
-				item.latestSuspicion = provider.Summary.Suspicion
+			snapshots := historySnapshots(result.CompletedAt, provider, groupBy, onlyProvider, onlyBenchmark)
+			for _, snapshot := range snapshots {
+				item := stats[snapshot.Name]
+				if item == nil {
+					item = &acc{
+						scoreMin:  snapshot.Score,
+						scoreMax:  snapshot.Score,
+						provider:  snapshot.Provider,
+						benchmark: snapshot.Benchmark,
+					}
+					stats[snapshot.Name] = item
+				}
+				item.runs++
+				item.scoreSum += snapshot.Score
+				item.passRateSum += snapshot.PassRate
+				if snapshot.Score < item.scoreMin {
+					item.scoreMin = snapshot.Score
+				}
+				if snapshot.Score > item.scoreMax {
+					item.scoreMax = snapshot.Score
+				}
+				if snapshot.Suspicion == "medium" {
+					item.mediumCount++
+				}
+				if snapshot.Suspicion == "high" {
+					item.highCount++
+				}
+				item.errorRuns += snapshot.ErrorRuns
+				if snapshot.CompletedAt.After(item.latestCompleted) {
+					item.latestCompleted = snapshot.CompletedAt
+					item.latestScore = snapshot.Score
+					item.latestPassRate = snapshot.PassRate
+					item.latestSuspicion = snapshot.Suspicion
+				}
 			}
 		}
 	}
@@ -450,65 +478,86 @@ func buildHistorySummary(results []report.RunResult, onlyProvider string) (strin
 
 	var b strings.Builder
 	b.WriteString("Provider Probe History Summary\n\n")
+	b.WriteString(fmt.Sprintf("- Group by: %s\n", groupBy))
+	if onlyProvider != "" {
+		b.WriteString(fmt.Sprintf("- Provider filter: %s\n", onlyProvider))
+	}
+	if onlyBenchmark != "" {
+		b.WriteString(fmt.Sprintf("- Benchmark filter: %s\n", onlyBenchmark))
+	}
+	b.WriteString("\n")
 	aggregates := make([]historyAggregate, 0, len(names))
 	for _, name := range names {
 		item := stats[name]
 		avg := item.scoreSum / float64(item.runs)
+		avgPassRate := item.passRateSum / float64(item.runs)
 		aggregates = append(aggregates, historyAggregate{
 			Name:            name,
-			Runs:            item.runs,
+			Provider:        item.provider,
+			Benchmark:       item.benchmark,
+			Reports:         item.runs,
 			ScoreSum:        item.scoreSum,
 			ScoreMin:        item.scoreMin,
 			ScoreMax:        item.scoreMax,
+			PassRateSum:     item.passRateSum,
 			MediumCount:     item.mediumCount,
 			HighCount:       item.highCount,
 			ErrorRuns:       item.errorRuns,
 			LatestCompleted: item.latestCompleted,
 			LatestScore:     item.latestScore,
+			LatestPassRate:  item.latestPassRate,
 			LatestSuspicion: item.latestSuspicion,
 		})
 		b.WriteString(fmt.Sprintf("## %s\n", name))
 		b.WriteString(fmt.Sprintf("- Reports: %d\n", item.runs))
 		b.WriteString(fmt.Sprintf("- Score avg/min/max: %.1f / %.1f / %.1f\n", avg, item.scoreMin, item.scoreMax))
-		b.WriteString(fmt.Sprintf("- Latest score/suspicion: %.1f / %s (%s)\n", item.latestScore, item.latestSuspicion, item.latestCompleted.Format(time.RFC3339)))
+		b.WriteString(fmt.Sprintf("- Pass rate avg/latest: %.1f%% / %.1f%%\n", avgPassRate*100, item.latestPassRate*100))
+		b.WriteString(fmt.Sprintf("- Latest score/pass rate/suspicion: %.1f / %.1f%% / %s (%s)\n", item.latestScore, item.latestPassRate*100, item.latestSuspicion, item.latestCompleted.Format(time.RFC3339)))
 		b.WriteString(fmt.Sprintf("- Volatility: %.1f\n", item.scoreMax-item.scoreMin))
 		b.WriteString(fmt.Sprintf("- Suspicion medium/high counts: %d / %d\n", item.mediumCount, item.highCount))
 		b.WriteString(fmt.Sprintf("- Total error runs: %d\n\n", item.errorRuns))
 		b.WriteString(fmt.Sprintf("- Verdict: %s\n\n", historyVerdict(historyAggregate{
 			Name:            name,
-			Runs:            item.runs,
+			Provider:        item.provider,
+			Benchmark:       item.benchmark,
+			Reports:         item.runs,
 			ScoreSum:        item.scoreSum,
 			ScoreMin:        item.scoreMin,
 			ScoreMax:        item.scoreMax,
+			PassRateSum:     item.passRateSum,
 			MediumCount:     item.mediumCount,
 			HighCount:       item.highCount,
 			ErrorRuns:       item.errorRuns,
 			LatestCompleted: item.latestCompleted,
 			LatestScore:     item.latestScore,
+			LatestPassRate:  item.latestPassRate,
 			LatestSuspicion: item.latestSuspicion,
 		})))
 	}
-	return b.String(), aggregates
+	return b.String(), aggregates, nil
 }
 
 func historySummary(results []report.RunResult, onlyProvider string) string {
-	s, _ := buildHistorySummary(results, onlyProvider)
+	s, _, _ := buildHistorySummary(results, onlyProvider, "", "provider")
 	return s
 }
 
-func historyMarkdown(items []historyAggregate) string {
+func historyMarkdown(items []historyAggregate, groupBy string) string {
+	nameHeader := historyNameHeader(groupBy)
 	var b strings.Builder
 	b.WriteString("# Provider Probe History Summary\n\n")
-	b.WriteString("| Provider | Reports | Avg Score | Min Score | Max Score | Latest | Volatility | Medium | High | Error Runs | Verdict |\n")
-	b.WriteString("| --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- |\n")
+	b.WriteString(fmt.Sprintf("- Group by: %s\n\n", groupBy))
+	b.WriteString(fmt.Sprintf("| %s | Reports | Avg Score | Avg Pass Rate | Min Score | Max Score | Latest | Volatility | Medium | High | Error Runs | Verdict |\n", nameHeader))
+	b.WriteString("| --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- |\n")
 	for _, item := range items {
-		avg := item.ScoreSum / float64(item.Runs)
-		b.WriteString(fmt.Sprintf("| %s | %d | %.1f | %.1f | %.1f | %.1f/%s | %.1f | %d | %d | %d | %s |\n", item.Name, item.Runs, avg, item.ScoreMin, item.ScoreMax, item.LatestScore, item.LatestSuspicion, item.ScoreMax-item.ScoreMin, item.MediumCount, item.HighCount, item.ErrorRuns, historyVerdict(item)))
+		avg := item.ScoreSum / float64(item.Reports)
+		avgPassRate := item.PassRateSum / float64(item.Reports)
+		b.WriteString(fmt.Sprintf("| %s | %d | %.1f | %.1f%% | %.1f | %.1f | %.1f/%.1f%%/%s | %.1f | %d | %d | %d | %s |\n", item.Name, item.Reports, avg, avgPassRate*100, item.ScoreMin, item.ScoreMax, item.LatestScore, item.LatestPassRate*100, item.LatestSuspicion, item.ScoreMax-item.ScoreMin, item.MediumCount, item.HighCount, item.ErrorRuns, historyVerdict(item)))
 	}
 	return b.String()
 }
 
-func historyHTML(items []historyAggregate) (string, error) {
+func historyHTML(items []historyAggregate, groupBy string) (string, error) {
 	const tpl = `<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><title>Provider Probe History</title>
@@ -516,11 +565,12 @@ func historyHTML(items []historyAggregate) (string, error) {
 </head>
 <body>
 <h1>Provider Probe History Summary</h1>
+<p>Group by: {{ .GroupBy }}</p>
 <table>
-<thead><tr><th>Provider</th><th>Reports</th><th>Avg Score</th><th>Min</th><th>Max</th><th>Latest</th><th>Volatility</th><th>Medium</th><th>High</th><th>Error Runs</th><th>Verdict</th></tr></thead>
+<thead><tr><th>{{ .NameHeader }}</th><th>Reports</th><th>Avg Score</th><th>Avg Pass Rate</th><th>Min</th><th>Max</th><th>Latest</th><th>Volatility</th><th>Medium</th><th>High</th><th>Error Runs</th><th>Verdict</th></tr></thead>
 <tbody>
-{{ range . }}
-<tr><td>{{ .Name }}</td><td>{{ .Runs }}</td><td>{{ printf "%.1f" (avg .ScoreSum .Runs) }}</td><td>{{ printf "%.1f" .ScoreMin }}</td><td>{{ printf "%.1f" .ScoreMax }}</td><td>{{ printf "%.1f/%s" .LatestScore .LatestSuspicion }}</td><td>{{ printf "%.1f" (volatility .ScoreMin .ScoreMax) }}</td><td>{{ .MediumCount }}</td><td>{{ .HighCount }}</td><td>{{ .ErrorRuns }}</td><td>{{ verdict . }}</td></tr>
+{{ range .Items }}
+<tr><td>{{ .Name }}</td><td>{{ .Reports }}</td><td>{{ printf "%.1f" (avg .ScoreSum .Reports) }}</td><td>{{ printf "%.1f%%" (mul100 (avg .PassRateSum .Reports)) }}</td><td>{{ printf "%.1f" .ScoreMin }}</td><td>{{ printf "%.1f" .ScoreMax }}</td><td>{{ printf "%.1f/%.1f%%/%s" .LatestScore (mul100 .LatestPassRate) .LatestSuspicion }}</td><td>{{ printf "%.1f" (volatility .ScoreMin .ScoreMax) }}</td><td>{{ .MediumCount }}</td><td>{{ .HighCount }}</td><td>{{ .ErrorRuns }}</td><td>{{ verdict . }}</td></tr>
 {{ end }}
 </tbody>
 </table>
@@ -532,6 +582,7 @@ func historyHTML(items []historyAggregate) (string, error) {
 			}
 			return sum / float64(runs)
 		},
+		"mul100":     func(v float64) float64 { return v * 100 },
 		"volatility": func(min, max float64) float64 { return max - min },
 		"verdict":    historyVerdict,
 	}).Parse(tpl)
@@ -539,10 +590,157 @@ func historyHTML(items []historyAggregate) (string, error) {
 		return "", err
 	}
 	var b strings.Builder
-	if err := t.Execute(&b, items); err != nil {
+	data := struct {
+		GroupBy    string
+		NameHeader string
+		Items      []historyAggregate
+	}{
+		GroupBy:    groupBy,
+		NameHeader: historyNameHeader(groupBy),
+		Items:      items,
+	}
+	if err := t.Execute(&b, data); err != nil {
 		return "", err
 	}
 	return b.String(), nil
+}
+
+type historySnapshot struct {
+	Name        string
+	Provider    string
+	Benchmark   string
+	Score       float64
+	PassRate    float64
+	Suspicion   string
+	ErrorRuns   int
+	CompletedAt time.Time
+}
+
+func historySnapshots(completedAt time.Time, provider report.ProviderResult, groupBy, onlyProvider, onlyBenchmark string) []historySnapshot {
+	if onlyProvider != "" && provider.Name != onlyProvider {
+		return nil
+	}
+	switch groupBy {
+	case "provider":
+		if onlyBenchmark == "" {
+			return []historySnapshot{{
+				Name:        provider.Name,
+				Provider:    provider.Name,
+				Score:       provider.Summary.Score,
+				PassRate:    provider.Summary.PassRate,
+				Suspicion:   provider.Summary.Suspicion,
+				ErrorRuns:   provider.Summary.ErrorRuns,
+				CompletedAt: completedAt,
+			}}
+		}
+		filtered := filterRunsByBenchmark(provider.Runs, onlyBenchmark)
+		if len(filtered) == 0 {
+			return nil
+		}
+		bench := summarizeHistoryBenchmark(filtered, onlyBenchmark)
+		return []historySnapshot{{
+			Name:        provider.Name,
+			Provider:    provider.Name,
+			Benchmark:   bench.Benchmark,
+			Score:       bench.AvgScore * 100,
+			PassRate:    bench.PassRate,
+			Suspicion:   benchmarkSuspicion(bench),
+			ErrorRuns:   bench.Errors,
+			CompletedAt: completedAt,
+		}}
+	case "benchmark", "provider-benchmark":
+		out := make([]historySnapshot, 0)
+		for _, bench := range report.SummarizeBenchmarks(provider.Runs) {
+			if onlyBenchmark != "" && bench.Benchmark != onlyBenchmark {
+				continue
+			}
+			name := bench.Benchmark
+			if groupBy == "provider-benchmark" {
+				name = provider.Name + " / " + bench.Benchmark
+			}
+			out = append(out, historySnapshot{
+				Name:        name,
+				Provider:    provider.Name,
+				Benchmark:   bench.Benchmark,
+				Score:       bench.AvgScore * 100,
+				PassRate:    bench.PassRate,
+				Suspicion:   benchmarkSuspicion(bench),
+				ErrorRuns:   bench.Errors,
+				CompletedAt: completedAt,
+			})
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func filterRunsByBenchmark(runs []report.CaseRunResult, benchmark string) []report.CaseRunResult {
+	out := make([]report.CaseRunResult, 0, len(runs))
+	for _, run := range runs {
+		if run.Benchmark == benchmark {
+			out = append(out, run)
+		}
+	}
+	return out
+}
+
+func benchmarkSuspicion(item report.BenchmarkSummary) string {
+	band := report.StarterBaselineBand(item.Benchmark, item.PassRate)
+	switch {
+	case item.Errors > 0:
+		return "high"
+	case band == "weak":
+		return "high"
+	case band == "acceptable":
+		return "medium"
+	case band == "strong":
+		return "low"
+	case item.PassRate < 0.4 || item.AvgScore < 0.4:
+		return "high"
+	case item.PassRate < 0.7 || item.AvgScore < 0.7:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+func summarizeHistoryBenchmark(runs []report.CaseRunResult, benchmark string) report.BenchmarkSummary {
+	if len(runs) == 0 {
+		return report.BenchmarkSummary{Benchmark: benchmark}
+	}
+	var passes, errors int
+	var score float64
+	for _, run := range runs {
+		if run.Passed {
+			passes++
+		}
+		if run.Error != "" {
+			errors++
+		}
+		score += run.Score
+	}
+	passRate := float64(passes) / float64(len(runs))
+	return report.BenchmarkSummary{
+		Benchmark:           benchmark,
+		Attempts:            len(runs),
+		Passes:              passes,
+		Errors:              errors,
+		PassRate:            passRate,
+		AvgScore:            score / float64(len(runs)),
+		StarterBaselineBand: report.StarterBaselineBand(benchmark, passRate),
+	}
+}
+
+func historyNameHeader(groupBy string) string {
+	switch groupBy {
+	case "benchmark":
+		return "Benchmark"
+	case "provider-benchmark":
+		return "Provider / Benchmark"
+	default:
+		return "Provider"
+	}
 }
 
 func compareCaseAverages(leftRuns, rightRuns []report.CaseRunResult) []string {
@@ -584,10 +782,24 @@ func compareCaseAverages(leftRuns, rightRuns []report.CaseRunResult) []string {
 
 func historyVerdict(item historyAggregate) string {
 	volatility := item.ScoreMax - item.ScoreMin
+	avgPassRate := 0.0
+	if item.Reports > 0 {
+		avgPassRate = item.PassRateSum / float64(item.Reports)
+	}
+	if item.Benchmark != "" {
+		switch {
+		case item.HighCount >= 2 || item.ErrorRuns >= item.Reports || volatility >= 40:
+			return "高波动/高风险，优先扩充 benchmark 样本并持续监控"
+		case item.HighCount >= 1 || item.MediumCount >= 2 || volatility >= 25:
+			return "存在不稳定信号，建议扩大样本和时段复测"
+		default:
+			return "当前较稳定，适合继续做粗粒度参水监测"
+		}
+	}
 	switch {
-	case item.HighCount >= 2 || item.ErrorRuns >= item.Runs || volatility >= 40:
-		return "高波动/高风险，优先做官方基线 A/B 并持续监控"
-	case item.HighCount >= 1 || item.MediumCount >= 2 || volatility >= 20:
+	case item.HighCount >= 2 || item.ErrorRuns >= item.Reports || item.LatestPassRate < 0.5 || avgPassRate < 0.55 || volatility >= 40:
+		return "高波动/高风险，优先扩充 benchmark 样本并持续监控"
+	case item.HighCount >= 1 || item.MediumCount >= 2 || item.LatestPassRate < 0.75 || avgPassRate < 0.75 || volatility >= 20:
 		return "存在不稳定信号，建议扩大样本和时段复测"
 	default:
 		return "当前较稳定，但仍建议保留周期性抽检"

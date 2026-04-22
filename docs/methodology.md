@@ -1,82 +1,99 @@
 # 判定方法
 
-## 目标
+## 总体思路
 
-本工具不是直接断言“这个 provider 一定换了模型”，而是输出一条可追溯证据链：
+本工具不再只依赖单次 A/B，而是结合两类信号：
 
-1. 返回模型标识是否稳定
-2. 格式约束是否能稳定满足
-3. 指令跟随/推理是否稳定
-4. 长上下文检索是否早衰
-5. 是否存在明显的网关异常（如 200 但 `choices: null`）
+1. **Probe signal**：格式、指令遵循、逻辑、长上下文、tool calling 稳定性
+2. **Benchmark signal**：通用 QA、逻辑题、WebQA、脑筋急转弯、工具调用数据集表现
 
-## 当前内置 case
+## 当前 probe case
 
-- `exact_json`：严格 JSON 输出
-- `exact_line`：严格单行输出
-- `logic_filter`：多条件逻辑过滤
-- `chinese_compact`：中文严格单行输出
-- `nested_json_schema`：嵌套 JSON 结构遵循
-- `response_format_json_schema`：JSON Schema 严格结构输出
-- `go_snippet_output`：Go 代码结果推断
-- `tool_call_echo`：工具/函数调用能力
-- `long_context_needle_small`：小规模长上下文检索
-- `long_context_needle_medium`：中规模长上下文检索
-- `long_context_needle_large`：大规模长上下文检索（默认关闭）
+- `exact_json`
+- `exact_line`
+- `logic_filter`
+- `chinese_compact`
+- `nested_json_schema`
+- `response_format_json_schema`
+- `go_snippet_output`
+- `tool_call_echo`
+- `long_context_needle_small`
+- `long_context_needle_medium`
+- `long_context_needle_large`
+
+## 当前 starter benchmark coverage
+
+- `commonsenseqa-starter`
+- `mmlu-pro-starter`
+- `gpqa-starter`
+- `logiqa-starter`
+- `bbh-logical-deduction-starter`
+- `bbh-tracking-objects-starter`
+- `webqa-starter`
+- `ruler-retrieval-starter`
+- `brainteaser-zh-starter`
+- `bfcl-style-tool-starter`
+
+## 当前 evaluator
+
+- `exact_match`
+- `regex_match`
+- `multiple_choice`
+- `tool_call`
+
+## 为什么不是只做 A/B
+
+只做 A/B 有几个问题：
+
+- 很难知道差异来自哪种能力
+- 不能稳定复现具体失败样本
+- 对内部专用数据集不友好
+- 对 WebQA / 逻辑 / tool calling 这类垂直能力不够细
+
+所以更合理的方式是：
+
+- 用 probe 看稳定性和协议行为
+- 用 benchmark 看能力矩阵
+- 用 history 看时段波动和漂移
+- 用 benchmark history 看具体测试集的退化位置，而不是只看 provider 总分
+
+## 为什么这里不用太严
+
+这个项目当前主要目标是：
+
+- 发现明显参水
+- 发现明显退化
+- 发现“还能回答但实际能力已经塌了”的情况
+
+所以这里采用的是：
+
+- starter 子集
+- 粗粒度 baseline band
+- 宽松但稳定的阈值
+
+重点不是复现学术分数，而是把**严重异常**尽快捞出来。
 
 ## Suspicion 解释
 
 ### low
-
-- 没有明显错误返回
-- 结构化输出与逻辑题稳定
-- 长上下文检索大体正常
+- 错误较少
+- 关键 probe 稳定
+- starter benchmark 没有明显塌陷
 
 ### medium
-
-- 存在单次或少量错误返回
-- 某一类能力偶发失稳
-- 需要扩大样本与时段继续观察
+- 有错误返回
+- 某些能力面不稳定
+- benchmark/probe 某个维度明显变弱
 
 ### high
-
-满足以下任一倾向：
-
 - 多次错误返回
-- 多个核心能力持续失稳
-- 同批 A/B 相比显著落后
-- 出现较频繁的 `choices: null` / usage 全 0 / 异常空响应
-
-## 特殊异常：HTTP 200 但无 choices
-
-如果 provider 返回 HTTP 200，但响应体中：
-
-- `choices` 为空或 `null`
-- `usage` 为 0
-- 无法产出可评估内容
-
-则应视为**有效结果缺失**，而不是“模型答错了”。
-这类问题更偏向：
-
-- 网关/路由异常
-- 推理任务未完成却被包装成成功
-- 下游服务退化或瞬时故障
+- 多个能力面持续失稳
+- 同批对比显著落后
+- benchmark pass rate 或总分明显偏低
 
 ## 最佳实践
 
-1. 先跑默认矩阵 2~3 次
-2. 再用 `timeslot_batch.sh` 在不同时段重跑
-3. 最好增加一个官方直连 baseline
-4. 看 trend，不看单次偶发结果
-
-## 建议的 baseline
-
-如果你怀疑某个 provider 在“参水”，最有力的方法仍然是同题 A/B：
-
-- target provider
-- 官方直连 baseline
-
-仓库里已经提供模板：
-
-- `examples/openai-baseline-template.json`
-- `examples/modelscope-vs-openai-template.json`
+1. 先跑 starter benchmark + probe
+2. 再加内部回归集
+3. 再做多时段重跑
+4. 最后再看是否需要对外 baseline A/B

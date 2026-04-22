@@ -1,0 +1,32 @@
+{
+  "providers": [
+    {
+      "name": "default-eino",
+      "type": "eino_openai",
+      "base_url_env": "BASE_URL",
+      "model_env": "MODEL",
+      "api_key_env": "OPENAI_API_KEY",
+      "timeout_seconds": 120,
+      "reasoning_effort": "high"
+    }
+  ],
+  "run": {
+    "repeats": 1,
+    "output": "artifacts/custom-dataset-example.json",
+    "temperature": 0,
+    "capture_headers": true
+  },
+  "suite": {
+    "cases": [
+      {
+        "name": "company-regression",
+        "enabled": true,
+        "dataset": {
+          "path": "benchmarks/custom/example-company-regression.jsonl",
+          "name": "company_regression",
+          "split": "dev"
+        }
+      }
+    ]
+  }
+}

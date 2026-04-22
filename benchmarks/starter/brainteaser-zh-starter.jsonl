@@ -1,0 +1,3 @@
+{"id":"brain-1","benchmark":"cn_brainteaser","split":"starter","category":"brainteaser","system_prompt":"你是脑筋急转弯答题器。只输出答案，不解释。","prompt":"什么东西越洗越脏？","expected":"水","acceptable_answers":["水"],"evaluator":"exact_match"}
+{"id":"brain-2","benchmark":"cn_brainteaser","split":"starter","category":"brainteaser","system_prompt":"你是脑筋急转弯答题器。只输出答案，不解释。","prompt":"什么门永远关不上？","expected":"球门","acceptable_answers":["球门"],"evaluator":"exact_match"}
+{"id":"brain-3","benchmark":"cn_brainteaser","split":"starter","category":"brainteaser","system_prompt":"你是脑筋急转弯答题器。只输出答案，不解释。","prompt":"什么车从来不需要加油？","expected":"风车","acceptable_answers":["风车"],"evaluator":"exact_match"}

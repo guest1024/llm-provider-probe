@@ -3,10 +3,13 @@ package suite
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
 	"model-codex/internal/config"
+	"model-codex/internal/dataset"
 	"model-codex/internal/provider"
 )
 
@@ -21,6 +24,9 @@ type EvalResult struct {
 type BuiltCase struct {
 	Name      string
 	Category  string
+	Benchmark string
+	Split     string
+	SampleID  string
 	Messages  []provider.Message
 	Expected  string
 	ExtraBody map[string]any
@@ -44,6 +50,28 @@ func AvailableCases() []string {
 }
 
 func Build(caseCfg config.CaseConfig) (BuiltCase, error) {
+	items, err := BuildMany(caseCfg)
+	if err != nil {
+		return BuiltCase{}, err
+	}
+	if len(items) != 1 {
+		return BuiltCase{}, fmt.Errorf("case %s expanded to %d samples; use BuildMany", caseCfg.Name, len(items))
+	}
+	return items[0], nil
+}
+
+func BuildMany(caseCfg config.CaseConfig) ([]BuiltCase, error) {
+	if caseCfg.Dataset != nil {
+		return buildDatasetCases(caseCfg)
+	}
+	single, err := buildBuiltinCase(caseCfg)
+	if err != nil {
+		return nil, err
+	}
+	return []BuiltCase{single}, nil
+}
+
+func buildBuiltinCase(caseCfg config.CaseConfig) (BuiltCase, error) {
 	switch caseCfg.Name {
 	case "exact_json":
 		return buildExactJSON(caseCfg), nil
@@ -66,6 +94,211 @@ func Build(caseCfg config.CaseConfig) (BuiltCase, error) {
 	default:
 		return BuiltCase{}, fmt.Errorf("unknown case: %s", caseCfg.Name)
 	}
+}
+
+func buildDatasetCases(caseCfg config.CaseConfig) ([]BuiltCase, error) {
+	ds := caseCfg.Dataset
+	samples, err := dataset.LoadJSONL(ds.Path, ds.Limit, ds.Shuffle)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]BuiltCase, 0, len(samples))
+	for _, sample := range samples {
+		category := sample.Category
+		if category == "" {
+			category = sample.Evaluator
+		}
+		benchmark := firstNonEmpty(ds.Name, sample.Benchmark, caseCfg.Name)
+		split := firstNonEmpty(ds.Split, sample.Split)
+		messages := buildDatasetMessages(sample)
+		extraBody := map[string]any{}
+		if len(sample.Tools) > 0 {
+			extraBody["tools"] = sample.Tools
+		}
+		if sample.ToolChoice != nil {
+			extraBody["tool_choice"] = sample.ToolChoice
+		}
+		items = append(items, BuiltCase{
+			Name:      caseCfg.Name,
+			Category:  category,
+			Benchmark: benchmark,
+			Split:     split,
+			SampleID:  sample.ID,
+			Messages:  messages,
+			Expected:  displayExpected(sample),
+			ExtraBody: extraBody,
+			Evaluate:  evaluatorForSample(sample),
+		})
+	}
+	return items, nil
+}
+
+func buildDatasetMessages(sample dataset.Sample) []provider.Message {
+	msgs := make([]provider.Message, 0, 2)
+	if sample.SystemPrompt != "" {
+		msgs = append(msgs, provider.Message{Role: "system", Content: sample.SystemPrompt})
+	}
+	var b strings.Builder
+	if sample.Context != "" {
+		b.WriteString("Context:\n")
+		b.WriteString(sample.Context)
+		b.WriteString("\n\n")
+	}
+	b.WriteString(sample.Prompt)
+	if len(sample.Choices) > 0 {
+		b.WriteString("\n\nChoices:\n")
+		for _, choice := range sample.Choices {
+			b.WriteString(choice)
+			b.WriteByte('\n')
+		}
+		b.WriteString("Reply with the best answer only.")
+	}
+	msgs = append(msgs, provider.Message{Role: "user", Content: strings.TrimSpace(b.String())})
+	return msgs
+}
+
+func evaluatorForSample(sample dataset.Sample) func(provider.Response) EvalResult {
+	switch sample.Evaluator {
+	case "regex_match":
+		return regexEvaluator(sample)
+	case "multiple_choice":
+		return multipleChoiceEvaluator(sample)
+	case "tool_call":
+		return toolCallEvaluator(sample)
+	default:
+		return exactMatchEvaluator(sample)
+	}
+}
+
+func exactMatchEvaluator(sample dataset.Sample) func(provider.Response) EvalResult {
+	answers := append([]string{}, sample.AcceptableAnswers...)
+	if sample.Expected != "" {
+		answers = append([]string{sample.Expected}, answers...)
+	}
+	answers = uniqueNormalized(answers)
+	return func(resp provider.Response) EvalResult {
+		actual := strings.TrimSpace(resp.Content)
+		norm := normalizeText(actual)
+		matched := false
+		for _, candidate := range answers {
+			if norm == candidate {
+				matched = true
+				break
+			}
+		}
+		score := 0.0
+		if matched {
+			score = 1.0
+		} else {
+			for _, candidate := range answers {
+				if candidate != "" && strings.Contains(norm, candidate) {
+					score = 0.5
+					break
+				}
+			}
+		}
+		warning := requiredSubstringWarning(actual, sample.RequiredSubstrings)
+		passed := matched && warning == ""
+		if matched && warning != "" {
+			score = 0.5
+		}
+		return EvalResult{Passed: passed, Score: score, Expected: displayExpected(sample), Actual: actual, Warning: warning}
+	}
+}
+
+func regexEvaluator(sample dataset.Sample) func(provider.Response) EvalResult {
+	re := regexp.MustCompile(sample.Regex)
+	return func(resp provider.Response) EvalResult {
+		actual := strings.TrimSpace(resp.Content)
+		passed := re.MatchString(actual)
+		score := 0.0
+		if passed {
+			score = 1.0
+		}
+		warning := requiredSubstringWarning(actual, sample.RequiredSubstrings)
+		if passed && warning != "" {
+			score = 0.5
+			passed = false
+		}
+		return EvalResult{Passed: passed, Score: score, Expected: sample.Regex, Actual: actual, Warning: warning}
+	}
+}
+
+func multipleChoiceEvaluator(sample dataset.Sample) func(provider.Response) EvalResult {
+	correct := normalizeChoice(sample.Expected)
+	if correct == "" && len(sample.AcceptableAnswers) > 0 {
+		correct = normalizeChoice(sample.AcceptableAnswers[0])
+	}
+	return func(resp provider.Response) EvalResult {
+		actual := strings.TrimSpace(resp.Content)
+		norm := normalizeChoice(actual)
+		passed := norm == correct
+		score := 0.0
+		if passed {
+			score = 1.0
+		} else if strings.Contains(normalizeText(actual), normalizeText(correct)) && correct != "" {
+			score = 0.5
+		}
+		warning := requiredSubstringWarning(actual, sample.RequiredSubstrings)
+		if passed && warning != "" {
+			score = 0.5
+			passed = false
+		}
+		return EvalResult{Passed: passed, Score: score, Expected: correct, Actual: actual, Warning: warning}
+	}
+}
+
+func toolCallEvaluator(sample dataset.Sample) func(provider.Response) EvalResult {
+	return func(resp provider.Response) EvalResult {
+		if len(resp.ToolCalls) == 0 {
+			return EvalResult{Passed: false, Score: 0, Expected: displayExpected(sample), Actual: resp.Content, Warning: "no tool call returned"}
+		}
+		call := resp.ToolCalls[0]
+		expected := dataset.ExpectedToolCall{}
+		if len(sample.ExpectedToolCalls) > 0 {
+			expected = sample.ExpectedToolCalls[0]
+		}
+		score := 0.0
+		if expected.Name != "" && call.Name == expected.Name {
+			score += 0.5
+		}
+		matchedArgs := true
+		if len(expected.Arguments) > 0 {
+			matchedArgs = jsonSubset(call.Arguments, expected.Arguments)
+			if matchedArgs {
+				score += 0.5
+			}
+		} else {
+			score += 0.5
+		}
+		actual := call.Name + "(" + call.Arguments + ")"
+		passed := score == 1.0 && matchedArgs
+		return EvalResult{Passed: passed, Score: score, Expected: displayExpected(sample), Actual: actual}
+	}
+}
+
+func displayExpected(sample dataset.Sample) string {
+	switch sample.Evaluator {
+	case "multiple_choice":
+		if sample.Expected != "" {
+			return sample.Expected
+		}
+		if len(sample.AcceptableAnswers) > 0 {
+			return sample.AcceptableAnswers[0]
+		}
+	case "tool_call":
+		if len(sample.ExpectedToolCalls) > 0 {
+			payload, _ := json.Marshal(sample.ExpectedToolCalls[0].Arguments)
+			return sample.ExpectedToolCalls[0].Name + "(" + string(payload) + ")"
+		}
+	}
+	if sample.Expected != "" {
+		return sample.Expected
+	}
+	if len(sample.AcceptableAnswers) > 0 {
+		return strings.Join(sample.AcceptableAnswers, " | ")
+	}
+	return ""
 }
 
 func buildExactJSON(caseCfg config.CaseConfig) BuiltCase {
@@ -395,4 +628,101 @@ func exactTextEvaluator(expected string) func(provider.Response) EvalResult {
 		}
 		return EvalResult{Passed: passed, Score: score, Expected: expected, Actual: actual}
 	}
+}
+
+func normalizeText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.Trim(value, " .。!！?？\t\n\r\"")
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func normalizeChoice(value string) string {
+	value = normalizeText(value)
+	if len(value) == 1 && value[0] >= 'a' && value[0] <= 'z' {
+		return strings.ToUpper(value)
+	}
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ')' || r == '.' || r == ':' || r == '：' || r == ' '
+	})
+	if len(parts) > 0 {
+		first := strings.TrimSpace(parts[0])
+		if len(first) == 1 && first[0] >= 'a' && first[0] <= 'z' {
+			return strings.ToUpper(first)
+		}
+	}
+	return strings.ToUpper(value)
+}
+
+func requiredSubstringWarning(actual string, required []string) string {
+	if len(required) == 0 {
+		return ""
+	}
+	normActual := normalizeText(actual)
+	missing := make([]string, 0)
+	for _, item := range required {
+		if !strings.Contains(normActual, normalizeText(item)) {
+			missing = append(missing, item)
+		}
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	sort.Strings(missing)
+	return "missing required substrings: " + strings.Join(missing, ", ")
+}
+
+func uniqueNormalized(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		norm := normalizeText(value)
+		if norm == "" {
+			continue
+		}
+		if _, ok := seen[norm]; ok {
+			continue
+		}
+		seen[norm] = struct{}{}
+		out = append(out, norm)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func jsonSubset(actualJSON string, expected map[string]any) bool {
+	var actual map[string]any
+	if err := json.Unmarshal([]byte(actualJSON), &actual); err != nil {
+		return false
+	}
+	return mapSubset(actual, expected)
+}
+
+func mapSubset(actual, expected map[string]any) bool {
+	for key, want := range expected {
+		got, ok := actual[key]
+		if !ok {
+			return false
+		}
+		switch wantTyped := want.(type) {
+		case map[string]any:
+			gotTyped, ok := got.(map[string]any)
+			if !ok || !mapSubset(gotTyped, wantTyped) {
+				return false
+			}
+		default:
+			if normalizeText(fmt.Sprint(got)) != normalizeText(fmt.Sprint(want)) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
