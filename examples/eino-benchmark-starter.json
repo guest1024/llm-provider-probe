@@ -17,7 +17,19 @@
     "repeats": 1,
     "output": "artifacts/eino-benchmark-starter.json",
     "temperature": 0,
-    "capture_headers": true
+    "capture_headers": true,
+    "reference_scores": {
+      "commonsenseqa": 0.90,
+      "mmlu_pro":      0.75,
+      "gpqa":          0.65,
+      "logiqa":        0.75,
+      "bbh_logical_deduction":         0.90,
+      "bbh_tracking_shuffled_objects": 0.85,
+      "webqa":          0.85,
+      "ruler_retrieval": 0.90,
+      "cn_brainteaser": 0.75,
+      "bfcl_style":     0.95
+    }
   },
   "suite": {
     "cases": [

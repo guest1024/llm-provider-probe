@@ -97,3 +97,20 @@
 2. 再加内部回归集
 3. 再做多时段重跑
 4. 最后再看是否需要对外 baseline A/B
+
+## 注水检测：参考分阈值法
+
+本工具的核心注水检测机制是**单模型参考分阈值法**：
+
+1. 预先标定各 benchmark 上顶级模型的 pass rate 作为参考分（`reference_scores`）
+2. 每次运行时，对比被测模型的实际 pass rate 与参考分
+3. 如果 `actual_pass_rate < reference_score × 0.8`，则标记该 benchmark 为注水嫌疑
+4. 任意 benchmark 触发注水嫌疑，`suspicion` 直接升级为 `high`
+
+这个方法的优势：
+
+- **不需要 A/B**：不需要同时维护对照组模型
+- **可重复**：每次运行都和同一参考分对比，形成时序趋势
+- **可自定义**：支持用自己的业务题目标定参考分
+
+详细说明见 `docs/watermark-detection.md`。

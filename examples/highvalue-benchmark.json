@@ -1,0 +1,50 @@
+{
+  "providers": [
+    {
+      "name": "default-eino",
+      "type": "eino_openai",
+      "base_url_env": "BASE_URL",
+      "model_env": "MODEL",
+      "api_key_env": "OPENAI_API_KEY",
+      "timeout_seconds": 120,
+      "headers": {
+        "X-Debug-Client": "provider-probe-highvalue"
+      }
+    }
+  ],
+  "run": {
+    "repeats": 1,
+    "output": "artifacts/highvalue-benchmark.json",
+    "temperature": 0,
+    "capture_headers": true,
+    "reference_scores": {
+      "gpqa":     0.65,
+      "mmlu_pro": 0.75
+    }
+  },
+  "suite": {
+    "cases": [
+      {"name": "logic_filter", "enabled": true},
+      {"name": "exact_json", "enabled": true},
+      {"name": "long_context_needle_small", "enabled": true, "params": {"approx_tokens": 4000}},
+      {
+        "name": "gpqa-diamond-real",
+        "enabled": true,
+        "dataset": {
+          "path": "benchmarks/starter/gpqa-diamond-real.jsonl",
+          "name": "gpqa",
+          "split": "diamond"
+        }
+      },
+      {
+        "name": "mmlu-pro-real",
+        "enabled": true,
+        "dataset": {
+          "path": "benchmarks/starter/mmlu-pro-real.jsonl",
+          "name": "mmlu_pro",
+          "split": "test"
+        }
+      }
+    ]
+  }
+}

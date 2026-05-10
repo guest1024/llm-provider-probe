@@ -68,6 +68,10 @@ type BenchmarkSummary struct {
 	AvgScore            float64 `json:"avg_score"`
 	AvgLatencyMs        int64   `json:"avg_latency_ms"`
 	StarterBaselineBand string  `json:"starter_baseline_band,omitempty"`
+	// ReferenceScore is the best-in-class model pass rate for this benchmark (0 if not configured).
+	ReferenceScore    float64 `json:"reference_score,omitempty"`
+	// WatermarkSuspected is true when pass_rate < reference_score * 0.8.
+	WatermarkSuspected bool    `json:"watermark_suspected,omitempty"`
 }
 
 func Markdown(result RunResult) string {
@@ -96,10 +100,18 @@ func Markdown(result RunResult) string {
 		}
 		if rows := benchmarkRows(provider); len(rows) > 0 {
 			b.WriteString("\n### Benchmark Summary\n\n")
-			b.WriteString("| Benchmark | Split | Attempts | Passes | Errors | Pass Rate | Avg Score | Avg Latency(ms) | Starter Band |\n")
-			b.WriteString("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n")
+			b.WriteString("| Benchmark | Split | Attempts | Passes | Errors | Pass Rate | Ref Score | Watermark? | Avg Score | Avg Latency(ms) | Starter Band |\n")
+			b.WriteString("| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | --- |\n")
 			for _, row := range rows {
-				b.WriteString(fmt.Sprintf("| %s | %s | %d | %d | %d | %.1f%% | %.2f | %d | %s |\n", row.Benchmark, row.Split, row.Attempts, row.Passes, row.Errors, row.PassRate*100, row.AvgScore, row.AvgLatencyMs, row.StarterBaselineBand))
+				refScore := "-"
+				if row.ReferenceScore > 0 {
+					refScore = fmt.Sprintf("%.1f%%", row.ReferenceScore*100)
+				}
+				watermark := ""
+				if row.WatermarkSuspected {
+					watermark = "⚠️ YES"
+				}
+				b.WriteString(fmt.Sprintf("| %s | %s | %d | %d | %d | %.1f%% | %s | %s | %.2f | %d | %s |\n", row.Benchmark, row.Split, row.Attempts, row.Passes, row.Errors, row.PassRate*100, refScore, watermark, row.AvgScore, row.AvgLatencyMs, row.StarterBaselineBand))
 			}
 		}
 		b.WriteString("\n### Case Summary\n\n")
@@ -159,7 +171,7 @@ func HTML(result RunResult) (string, error) {
     <h3>Benchmark Summary</h3>
     <table>
       <thead>
-        <tr><th>Benchmark</th><th>Split</th><th>Attempts</th><th>Passes</th><th>Errors</th><th>Pass Rate</th><th>Avg Score</th><th>Avg Latency (ms)</th><th>Starter Band</th></tr>
+        <tr><th>Benchmark</th><th>Split</th><th>Attempts</th><th>Passes</th><th>Errors</th><th>Pass Rate</th><th>Ref Score</th><th>Watermark?</th><th>Avg Score</th><th>Avg Latency (ms)</th><th>Starter Band</th></tr>
       </thead>
       <tbody>
         {{ range $benchmarks }}
@@ -170,6 +182,8 @@ func HTML(result RunResult) (string, error) {
           <td>{{ .Passes }}</td>
           <td>{{ .Errors }}</td>
           <td>{{ printf "%.1f%%" (mul100 .PassRate) }}</td>
+          <td>{{ if gt .ReferenceScore 0.0 }}{{ printf "%.1f%%" (mul100 .ReferenceScore) }}{{ else }}-{{ end }}</td>
+          <td>{{ if .WatermarkSuspected }}<span style="color:#b42318;font-weight:bold">⚠️ YES</span>{{ end }}</td>
           <td>{{ printf "%.2f" .AvgScore }}</td>
           <td>{{ .AvgLatencyMs }}</td>
           <td>{{ .StarterBaselineBand }}</td>

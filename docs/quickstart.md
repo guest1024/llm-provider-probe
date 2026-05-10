@@ -82,3 +82,12 @@ python3 scripts/convert_dataset.py \
   --input benchmarks/source-samples/mmlu-pro-sample.jsonl \
   --output /tmp/mmlu-pro.converted.jsonl
 ```
+
+## 12. 了解注水检测原理
+
+```bash
+cat docs/watermark-detection.md
+```
+
+注水检测基于**最高水准模型参考分 -20%** 阈值，不需要 A/B 对比。
+详细说明见 `docs/watermark-detection.md`。

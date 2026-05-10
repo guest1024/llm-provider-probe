@@ -96,11 +96,11 @@ func runProvider(ctx context.Context, providerCfg config.ProviderConfig, cfg con
 		}
 	}
 
-	out.Summary = summarizeProvider(out.Runs)
+	out.Summary = summarizeProvider(out.Runs, cfg.Run.ReferenceScores)
 	return out, nil
 }
 
-func summarizeProvider(runs []report.CaseRunResult) report.ProviderSummary {
+func summarizeProvider(runs []report.CaseRunResult, referenceScores map[string]float64) report.ProviderSummary {
 	summary := report.ProviderSummary{TotalRuns: len(runs)}
 	if len(runs) == 0 {
 		summary.Suspicion = "unknown"
@@ -142,7 +142,24 @@ func summarizeProvider(runs []report.CaseRunResult) report.ProviderSummary {
 
 	summary.Score = totalScore / float64(len(runs)) * 100
 	summary.PassRate = float64(summary.PassedRuns) / float64(len(runs))
-	summary.BenchmarkSummaries = report.SummarizeBenchmarks(runs)
+
+	// Build benchmark summaries and apply reference score watermark detection.
+	benchSummaries := report.SummarizeBenchmarks(runs)
+	watermarkSuspected := false
+	for i, bs := range benchSummaries {
+		if ref, ok := referenceScores[bs.Benchmark]; ok && ref > 0 {
+			benchSummaries[i].ReferenceScore = ref
+			if bs.PassRate < ref*0.8 {
+				benchSummaries[i].WatermarkSuspected = true
+				watermarkSuspected = true
+				summary.Warnings = append(summary.Warnings, fmt.Sprintf(
+					"benchmark %s pass rate %.1f%% is below reference %.1f%% × 80%% = %.1f%% — watermark suspected",
+					bs.Benchmark, bs.PassRate*100, ref*100, ref*0.8*100,
+				))
+			}
+		}
+	}
+	summary.BenchmarkSummaries = benchSummaries
 	summary.DistinctReturnedModels = sortedKeys(modelSet)
 
 	if len(summary.DistinctReturnedModels) > 1 {
@@ -178,7 +195,7 @@ func summarizeProvider(runs []report.CaseRunResult) report.ProviderSummary {
 	}
 
 	switch {
-	case summary.ErrorRuns >= 2 || len(summary.Warnings) >= 3 || summary.Score < 50:
+	case watermarkSuspected || summary.ErrorRuns >= 2 || len(summary.Warnings) >= 3 || summary.Score < 50:
 		summary.Suspicion = "high"
 	case summary.ErrorRuns >= 1 || len(summary.Warnings) >= 1 || summary.Score < 75:
 		summary.Suspicion = "medium"

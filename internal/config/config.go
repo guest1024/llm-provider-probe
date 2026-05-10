@@ -30,10 +30,13 @@ type ProviderConfig struct {
 }
 
 type RunConfig struct {
-	Repeats        int     `json:"repeats"`
-	Output         string  `json:"output,omitempty"`
-	Temperature    float64 `json:"temperature"`
-	CaptureHeaders bool    `json:"capture_headers"`
+	Repeats         int                `json:"repeats"`
+	Output          string             `json:"output,omitempty"`
+	Temperature     float64            `json:"temperature"`
+	CaptureHeaders  bool               `json:"capture_headers"`
+	// ReferenceScores maps benchmark name → best-in-class model pass rate (0.0–1.0).
+	// If a benchmark's pass rate falls below reference * 0.8, watermark is suspected.
+	ReferenceScores map[string]float64 `json:"reference_scores,omitempty"`
 }
 
 type SuiteConfig struct {

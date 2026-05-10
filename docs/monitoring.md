@@ -55,6 +55,19 @@
 - probe 不要出现连续失败
 - history 中不要持续出现 `high`
 
+
+### 参考分注水检测（推荐）
+
+`eino-monitoring-minimal.json` 已内置 `reference_scores`，启用了基于参考分的注水检测：
+
+- 如果某个 benchmark 的 pass rate 低于参考分的 **80%**，报告中会出现 `⚠️ YES` 标记
+- `suspicion` 会直接升级为 `high`
+- warnings 中会输出具体原因，例如：
+  ```
+  benchmark gpqa pass rate 30.0% is below reference 65.0% × 80% = 52.0% — watermark suspected
+  ```
+
+详细原理见 `docs/watermark-detection.md`。
 ### 一个实用的粗判标准
 
 如果出现下面任一情况，就值得怀疑 provider 明显参水：

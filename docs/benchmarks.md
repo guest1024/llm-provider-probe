@@ -86,3 +86,26 @@ Then run:
 ```bash
 ./scripts/run_eino_starter.sh
 ```
+
+## 注水检测参考分（reference_scores）
+
+除了 starter band，本工具支持基于**最高水准模型参考分**的注水检测。
+
+原理：如果被测模型的 pass rate 低于参考分的 80%，则判定存在注水嫌疑。
+
+内置参考分（基于 GPT-4o / Claude 3.5 Sonnet 在 starter 子集上的预期表现）：
+
+| Benchmark | 参考分 | 注水阈值（×80%） |
+| --- | ---: | ---: |
+| commonsenseqa | 90% | 72% |
+| mmlu_pro | 75% | 60% |
+| gpqa | 65% | 52% |
+| logiqa | 75% | 60% |
+| bbh_logical_deduction | 90% | 72% |
+| bbh_tracking_shuffled_objects | 85% | 68% |
+| webqa | 85% | 68% |
+| ruler_retrieval | 90% | 72% |
+| cn_brainteaser | 75% | 60% |
+| bfcl_style | 95% | 76% |
+
+配置方式和详细说明见 `docs/watermark-detection.md`。
