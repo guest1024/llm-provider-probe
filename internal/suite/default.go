@@ -163,6 +163,8 @@ func evaluatorForSample(sample dataset.Sample) func(provider.Response) EvalResul
 		return regexEvaluator(sample)
 	case "multiple_choice":
 		return multipleChoiceEvaluator(sample)
+	case "contains":
+		return containsEvaluator(sample)
 	case "tool_call":
 		return toolCallEvaluator(sample)
 	default:
@@ -177,7 +179,7 @@ func exactMatchEvaluator(sample dataset.Sample) func(provider.Response) EvalResu
 	}
 	answers = uniqueNormalized(answers)
 	return func(resp provider.Response) EvalResult {
-		actual := strings.TrimSpace(resp.Content)
+		actual := stripHallucinationMarkers(strings.TrimSpace(resp.Content))
 		norm := normalizeText(actual)
 		matched := false
 		for _, candidate := range answers {
@@ -206,6 +208,23 @@ func exactMatchEvaluator(sample dataset.Sample) func(provider.Response) EvalResu
 	}
 }
 
+func containsEvaluator(sample dataset.Sample) func(provider.Response) EvalResult {
+	answers := append([]string{}, sample.AcceptableAnswers...)
+	if sample.Expected != "" {
+		answers = append([]string{sample.Expected}, answers...)
+	}
+	return func(resp provider.Response) EvalResult {
+		actual := stripHallucinationMarkers(strings.TrimSpace(resp.Content))
+		norm := normalizeText(actual)
+		for _, candidate := range answers {
+			if strings.Contains(norm, normalizeText(candidate)) {
+				return EvalResult{Passed: true, Score: 1.0, Expected: displayExpected(sample), Actual: actual}
+			}
+		}
+		return EvalResult{Passed: false, Score: 0, Expected: displayExpected(sample), Actual: actual}
+	}
+}
+
 func regexEvaluator(sample dataset.Sample) func(provider.Response) EvalResult {
 	re := regexp.MustCompile(sample.Regex)
 	return func(resp provider.Response) EvalResult {
@@ -230,7 +249,7 @@ func multipleChoiceEvaluator(sample dataset.Sample) func(provider.Response) Eval
 		correct = normalizeChoice(sample.AcceptableAnswers[0])
 	}
 	return func(resp provider.Response) EvalResult {
-		actual := strings.TrimSpace(resp.Content)
+		actual := stripHallucinationMarkers(strings.TrimSpace(resp.Content))
 		norm := normalizeChoice(actual)
 		passed := norm == correct
 		score := 0.0
@@ -634,6 +653,21 @@ func normalizeText(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.Trim(value, " .。!！?？\t\n\r\"")
 	return strings.Join(strings.Fields(value), " ")
+}
+
+func stripHallucinationMarkers(value string) string {
+	// Strip DeepSeek hallucinated tool call markers before evaluation.
+	// Patterns: <web_search>...\n, <｜DSML｜function_calls\n<web_search>...\n
+	if idx := strings.Index(value, "<web_search>"); idx >= 0 {
+		value = strings.TrimSpace(value[:idx])
+	}
+	if idx := strings.Index(value, "<\xef\xbd\x9cDSML\xef\xbd\x9c"); idx >= 0 {
+		value = strings.TrimSpace(value[:idx])
+	}
+	if idx := strings.Index(value, "<｜DSML｜"); idx >= 0 {
+		value = strings.TrimSpace(value[:idx])
+	}
+	return value
 }
 
 func normalizeChoice(value string) string {

@@ -1,0 +1,58 @@
+{
+  "providers": [
+    {
+      "name": "deepseek-v4-flash",
+      "type": "eino_openai",
+      "base_url_env": "BASE_URL",
+      "model_env": "MODEL",
+      "api_key_env": "OPENAI_API_KEY",
+      "timeout_seconds": 180,
+      "headers": {
+        "X-Debug-Client": "provider-probe-full-eval"
+      }
+    }
+  ],
+  "run": {
+    "repeats": 1,
+    "output": "artifacts/deepseek-full-eval.json",
+    "temperature": 0,
+    "capture_headers": true,
+    "reference_scores": {
+      "commonsenseqa": 0.90,
+      "mmlu_pro":      0.75,
+      "gpqa":          0.65,
+      "logiqa":        0.75,
+      "bbh_logical_deduction":         0.90,
+      "bbh_tracking_shuffled_objects": 0.85,
+      "webqa":          0.85,
+      "ruler_retrieval": 0.90,
+      "cn_brainteaser": 0.75,
+      "bfcl_style":     0.95
+    }
+  },
+  "suite": {
+    "cases": [
+      {"name": "exact_json", "enabled": true},
+      {"name": "exact_line", "enabled": true},
+      {"name": "logic_filter", "enabled": true},
+      {"name": "chinese_compact", "enabled": true},
+      {"name": "nested_json_schema", "enabled": true},
+      {"name": "go_snippet_output", "enabled": true},
+      {"name": "long_context_needle_small", "enabled": true, "params": {"approx_tokens": 4000}},
+      {"name": "long_context_needle_medium", "enabled": true, "params": {"approx_tokens": 12000}},
+      {"name": "long_context_needle_large", "enabled": true, "params": {"approx_tokens": 32000}},
+      {"name": "commonsenseqa-full", "enabled": true, "dataset": {"path": "benchmarks/starter/commonsenseqa-starter.jsonl", "name": "commonsenseqa", "split": "starter"}},
+      {"name": "mmlu-pro-starter", "enabled": true, "dataset": {"path": "benchmarks/starter/mmlu-pro-starter.jsonl", "name": "mmlu_pro", "split": "starter"}},
+      {"name": "mmlu-pro-real", "enabled": true, "dataset": {"path": "benchmarks/starter/mmlu-pro-real.jsonl", "name": "mmlu_pro", "split": "test"}},
+      {"name": "gpqa-starter", "enabled": true, "dataset": {"path": "benchmarks/starter/gpqa-starter.jsonl", "name": "gpqa", "split": "starter"}},
+      {"name": "gpqa-diamond-real", "enabled": true, "dataset": {"path": "benchmarks/starter/gpqa-diamond-real.jsonl", "name": "gpqa", "split": "diamond"}},
+      {"name": "logiqa-full", "enabled": true, "dataset": {"path": "benchmarks/starter/logiqa-starter.jsonl", "name": "logiqa", "split": "starter"}},
+      {"name": "bbh-logical-deduction", "enabled": true, "dataset": {"path": "benchmarks/starter/bbh-logical-deduction-starter.jsonl", "name": "bbh_logical_deduction", "split": "starter"}},
+      {"name": "bbh-tracking-objects", "enabled": true, "dataset": {"path": "benchmarks/starter/bbh-tracking-objects-starter.jsonl", "name": "bbh_tracking_shuffled_objects", "split": "starter"}},
+      {"name": "webqa-full", "enabled": true, "dataset": {"path": "benchmarks/starter/webqa-starter.jsonl", "name": "webqa", "split": "starter"}},
+      {"name": "ruler-retrieval-full", "enabled": true, "dataset": {"path": "benchmarks/starter/ruler-retrieval-starter.jsonl", "name": "ruler_retrieval", "split": "starter"}},
+      {"name": "brainteaser-zh-full", "enabled": true, "dataset": {"path": "benchmarks/starter/brainteaser-zh-starter.jsonl", "name": "cn_brainteaser", "split": "starter"}},
+      {"name": "bfcl-style-tool", "enabled": true, "dataset": {"path": "benchmarks/starter/bfcl-style-tool-starter.jsonl", "name": "bfcl_style", "split": "starter"}}
+    ]
+  }
+}

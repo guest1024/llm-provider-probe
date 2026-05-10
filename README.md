@@ -1,304 +1,158 @@
 # provider-probe
 
-一个基于 **Eino** 的 LLM 评测/探针工具。
+LLM 中转服务质量评测工具。检测 API 中转商是否存在模型替换（注水）、能力退化、响应异常等问题。
 
-它现在同时覆盖两层能力：
+基于 [Eino](https://github.com/cloudwego/eino) 框架，兼容所有 OpenAI API 格式的 provider。
 
-1. **probe cases**：快速探测 provider 的格式稳定性、逻辑、长上下文、tool calling
-2. **benchmark-style datasets**：用统一 JSONL 标准接入通用 QA、WebQA、逻辑题、脑筋急转弯、工具调用等 eval 数据集
+## 它能做什么
 
-## 当前定位
-
-它不是纯 A/B 工具，也不是完整 leaderboard 框架；它更像：
-
-- 一个可复现的 **Eino-based eval runner**
-- 一个 provider 稳定性/退化探针
-- 一个可扩展的内部回归集执行器
-
-## 核心能力
-
-- 基于 `github.com/cloudwego/eino` + `github.com/cloudwego/eino-ext/components/model/openai`
-- 支持 OpenAI-compatible Base URL / API key / model 通过环境变量注入
-- 保留原有 probe cases
-- 新增 dataset-backed benchmark case 支持
-- 支持 `exact_match / regex_match / multiple_choice / tool_call` evaluator
+- 检测中转服务是否偷换模型（通过 `returned_model` 字段）
+- 评估模型核心能力：推理、常识、长上下文、Tool Calling
+- 基于 reference score 自动判定注水嫌疑
 - 输出 JSON / Markdown / HTML 报告
-- 支持 compare / history 汇总（provider / benchmark / provider-benchmark）
-- 支持自定义内部 JSONL 数据集接入
-
-## 推荐环境变量
-
-```bash
-export OPENAI_API_KEY="<your key>"
-export BASE_URL="https://vibediary.app/api/v1"
-export MODEL="gpt-5.4"
-```
-
-> 不要把真实 key 写进配置文件、README、脚本或提交记录。
-
----
+- 支持历史趋势对比和多 provider A/B 测试
 
 ## 快速开始
 
-### 1. 本地自测
+### 1. 设置环境变量
 
 ```bash
-./scripts/smoke.sh
+export OPENAI_API_KEY="<your-api-key>"
+export BASE_URL="<provider-base-url>"   # 如 http://localhost:58575/v1
+export MODEL="<model-name>"             # 如 claude-sonnet-4.5
 ```
 
-### 2. 查看内置 probe case
+### 2. 运行评测
 
 ```bash
-go run ./cmd/provider-probe -list-cases
-```
+# 快速监测（14 case，~30s）
+./scripts/run_eino_monitoring.sh
 
-### 3. 跑 Eino starter benchmark
+# 全量评测（68 case，~10min）
+./scripts/run_deepseek_full_eval.sh
 
-```bash
+# Starter benchmark（含所有 starter dataset）
 ./scripts/run_eino_starter.sh
 ```
 
-它会读取：
+### 3. 查看报告
 
-- `OPENAI_API_KEY`
-- `BASE_URL`
-- `MODEL`
+运行后在 `artifacts/` 目录生成：
+- `*.json` — 结构化数据
+- `*.md` — Markdown 可读报告
+- `*.html` — 浏览器可视化报告
 
-并执行 `examples/eino-benchmark-starter.json` 中的 starter benchmark。
+## 项目结构
 
-### 4. 跑粗粒度参水监测配置
-
-```bash
-./scripts/run_eino_monitoring.sh
 ```
-
-它会执行一个更轻量的监测矩阵，目标是快速发现**严重参水/明显降级**，而不是追求和官方 benchmark 高度对齐。
-
-### 5. 跑单 provider 配置
-
-```bash
-go run ./cmd/provider-probe -config examples/eino-benchmark-starter.json
+cmd/provider-probe/       CLI 入口
+internal/
+  config/                 配置解析（环境变量 + JSON）
+  provider/               Eino OpenAI 客户端（API 通信层）
+  runner/                 执行引擎（遍历 case、收集结果、脱敏）
+  suite/                  内置 probe case 定义
+  dataset/                JSONL 数据集加载器
+  report/                 报告渲染（JSON/Markdown/HTML）
+benchmarks/
+  starter/                内置评测数据集（JSONL）
+  custom/                 自定义数据集示例
+  mappings/               外部 benchmark 转换映射
+examples/                 运行配置模板
+scripts/                  运行/对比/历史脚本
+docs/                     详细文档
+artifacts/                评测报告输出目录
 ```
-
-### 6. 跑自定义内部数据集
-
-```bash
-go run ./cmd/provider-probe -config examples/custom-dataset-template.json
-```
-
-### 7. 对比两次运行
-
-```bash
-./scripts/compare_reports.sh artifacts/run-a.json artifacts/run-b.json
-```
-
-### 8. 查看历史趋势
-
-```bash
-./scripts/history_summary.sh artifacts
-./scripts/history_summary.sh artifacts benchmark
-```
-
----
-
-## 当前支持的 probe case
-
-- `exact_json`
-- `exact_line`
-- `logic_filter`
-- `chinese_compact`
-- `nested_json_schema`
-- `response_format_json_schema`
-- `go_snippet_output`
-- `tool_call_echo`
-- `long_context_needle_small`
-- `long_context_needle_medium`
-- `long_context_needle_large`
-
-## 当前附带的 starter benchmark-style datasets
-
-- `benchmarks/starter/commonsenseqa-starter.jsonl`
-- `benchmarks/starter/mmlu-pro-starter.jsonl`
-- `benchmarks/starter/gpqa-starter.jsonl`
-- `benchmarks/starter/logiqa-starter.jsonl`
-- `benchmarks/starter/bbh-logical-deduction-starter.jsonl`
-- `benchmarks/starter/bbh-tracking-objects-starter.jsonl`
-- `benchmarks/starter/webqa-starter.jsonl`
-- `benchmarks/starter/ruler-retrieval-starter.jsonl`
-- `benchmarks/starter/brainteaser-zh-starter.jsonl`
-- `benchmarks/starter/bfcl-style-tool-starter.jsonl`
-
-这些 starter 集的用途是：
-
-- 验证框架接入
-- 做小规模回归
-- 给 provider 一个初级能力基线
-- 为后续接更大公开 benchmark 打样
-
-它们**不是**官方 leaderboard 成绩替代。
-
----
-
-## 自定义 dataset 接入
-
-项目支持通过 `suite.cases[].dataset` 指向 JSONL 数据集。
-
-最小配置示例：
-
-```json
-{
-  "name": "company-regression",
-  "enabled": true,
-  "dataset": {
-    "path": "benchmarks/custom/example-company-regression.jsonl",
-    "name": "company_regression",
-    "split": "dev"
-  }
-}
-```
-
-支持的 evaluator：
-
-- `exact_match`
-- `regex_match`
-- `multiple_choice`
-- `tool_call`
-
-详细字段说明见：
-
-- `docs/custom-dataset-standard.md`
-- `benchmarks/custom/example-company-regression.jsonl`
-- `examples/custom-dataset-template.json`
-
-## Benchmark 转换工具
-
-仓库提供原始 benchmark -> 本项目 JSONL 的转换脚本：
-
-```bash
-python3 scripts/convert_dataset.py \
-  --mapping benchmarks/mappings/commonsenseqa.mapping.json \
-  --input benchmarks/source-samples/commonsenseqa-sample.jsonl \
-  --output /tmp/commonsenseqa.converted.jsonl
-```
-
-更多说明见：
-
-- `docs/benchmark-conversion.md`
-- `benchmarks/mappings/*.mapping.json`
-- `benchmarks/source-samples/*`
-
-当前附带的 mapping 样例包括：
-
-- `commonsenseqa`
-- `mmlu-pro`
-- `gpqa`
-- `logiqa`
-- `webqa`
-- `ruler-retrieval`
-- `bbh-logical-deduction`
-- `brainteaser-zh`
-- `bfcl-style-tool`
-- `custom-regression`
-
----
-
-## Starter baseline 建议
-
-见 `docs/benchmarks.md`。
-
-当前仓库给的是 **starter baseline band**，不是学术 leaderboard：
-
-- `commonsenseqa-starter`
-- `mmlu-pro-starter`
-- `gpqa-starter`
-- `logiqa-starter`
-- `webqa-starter`
-- `ruler-retrieval-starter`
-- `cn_brainteaser`
-- `bfcl-style-tool-starter`
-
-用于把模型表现粗分为：
-
-- weak
-- acceptable
-- strong
-
-这些 band 现在也会出现在 provider report 的 benchmark summary 中，方便直接看“当前模型对这个 starter 子集处在哪个初级档位”。
-
-如果你的目标只是发现**严重参水**，优先看：
-
-- 是否掉到 `weak`
-- 是否多个 benchmark 同时变弱
-- 是否 probe 也同时失败
-
-不需要追求和预期分数完全严丝合缝。
-
----
-
-## 输出解释
-
-每轮运行会输出：
-
-- `score`
-- `suspicion`
-- `warnings`
-- `*.json`
-- `*.md`
-- `*.html`
-- 每个 sample/case 的：
-  - `benchmark`
-  - `split`
-  - `sample_id`
-  - `latency_ms`
-  - `status_code`
-  - `returned_model`
-  - `finish_reason`
-  - `prompt_tokens / completion_tokens / total_tokens`
-- `raw_response_snippet`
-- benchmark 维度汇总：
-  - `attempts / passes / errors`
-  - `pass_rate`
-  - `avg_score`
-  - `starter_baseline_band`
-
----
-
-## 目录说明
-
-- `internal/provider`：Eino-based model invocation
-- `internal/suite`：built-in probe cases + dataset case expansion
-- `internal/dataset`：JSONL dataset loader
-- `internal/report`：报告结构与渲染
-- `benchmarks/starter`：starter benchmark fixtures
-- `benchmarks/custom`：自定义数据集范例
-- `examples/*.json`：运行配置模板
-- `docs/benchmarks.md`：benchmark 覆盖与 starter baseline
-- `docs/custom-dataset-standard.md`：自定义数据集接入规范
-- `docs/monitoring.md`：粗粒度参水监测用法
-
----
 
 ## 常用命令
 
+| 命令 | 说明 |
+| --- | --- |
+| `make test` | 运行单元测试 |
+| `make eino-monitoring` | 快速监测 |
+| `make eino-starter` | Starter benchmark |
+| `make history` | 查看历史趋势 |
+| `make audit-secrets` | 密钥泄漏审计 |
+| `./provider-probe -list-cases` | 列出内置 probe case |
+
+## 配置方式
+
+### 环境变量模式（推荐）
+
 ```bash
-make test
-make list-cases
-make eino-starter
-make eino-monitoring
-make history
-make benchmark-history
-make history-files
-make benchmark-history-files
-make audit-secrets
+export OPENAI_API_KEY="sk-xxx"
+export BASE_URL="http://localhost:58575/v1"
+export MODEL="deepseek-3.2"
+./scripts/run_eino_monitoring.sh
 ```
 
----
+### 配置文件模式
 
-## 后续扩展建议
+```bash
+./provider-probe -config examples/deepseek-full-eval.json
+```
 
-优先顺序：
+### CLI 单次模式
 
-1. 接更完整的公开 benchmark 转换脚本
-2. 增加更多 evaluator（如 citation / evidence span / partial credit）
-3. 增加 live web browsing / browser-agent WebQA
-4. 增加 multi-step tool execution eval
+```bash
+./provider-probe \
+  -base-url "http://localhost:58575/v1" \
+  -model "deepseek-3.2" \
+  -api-key-env "OPENAI_API_KEY" \
+  -cases "exact_json,logic_filter"
+```
+
+## 内置 Probe Case
+
+| Case | 类别 | 检测目标 |
+| --- | --- | --- |
+| `exact_json` | 格式 | JSON 输出精确性 |
+| `exact_line` | 格式 | 单行精确输出 |
+| `logic_filter` | 推理 | 条件过滤逻辑 |
+| `chinese_compact` | 中文 | 中文紧凑输出 |
+| `nested_json_schema` | 格式 | 嵌套 JSON Schema |
+| `go_snippet_output` | 代码 | Go 代码片段 |
+| `tool_call_echo` | 工具 | Tool Calling |
+| `long_context_needle_*` | 长上下文 | Needle-in-Haystack |
+
+## Benchmark 数据集
+
+| 数据集 | 样本数 | 评估能力 |
+| --- | --- | --- |
+| commonsenseqa | 3 | 常识推理 |
+| mmlu-pro (starter) | 3 | 多学科知识 |
+| mmlu-pro (real) | 20 | 多学科知识（高难度） |
+| gpqa (starter) | 3 | 研究生级问答 |
+| gpqa-diamond (real) | 12 | 研究生级问答（高难度） |
+| logiqa | 3 | 逻辑推理 |
+| bbh-logical-deduction | 2 | 逻辑演绎 |
+| bbh-tracking-objects | 2 | 对象追踪 |
+| webqa | 3 | 基于文本的问答 |
+| ruler-retrieval | 3 | 长上下文检索 |
+| brainteaser-zh | 3 | 中文脑筋急转弯 |
+| bfcl-style-tool | 2 | Function Calling |
+
+## 注水检测原理
+
+1. **returned_model 检测**：请求 model A，响应返回 model B → 模型替换
+2. **Reference Score 阈值**：pass_rate < 参考分 × 80% → 注水嫌疑
+3. **Starter Baseline Band**：将通过率分为 weak / acceptable / strong
+
+详见 `docs/watermark-detection.md`。
+
+## 文档索引
+
+| 文档 | 内容 |
+| --- | --- |
+| [交接文档](docs/kiro-relay-architecture.md) | Kiro 中转架构、通信协议、评测结论 |
+| [测试指南](docs/testing-guide.md) | 如何运行测试、添加 case、解读报告 |
+| [注水检测](docs/watermark-detection.md) | 检测原理与阈值说明 |
+| [自定义数据集](docs/custom-dataset-standard.md) | JSONL 数据集接入规范 |
+| [Benchmark 转换](docs/benchmark-conversion.md) | 外部数据集转换方法 |
+| [监测用法](docs/monitoring.md) | 粗粒度定期监测配置 |
+| [安全规范](docs/security.md) | 密钥管理与脱敏 |
+
+## 安全
+
+- 所有报告输出自动脱敏（API key、Bearer token）
+- 不要将密钥写入配置文件或提交到仓库
+- 使用环境变量注入所有敏感信息
